@@ -429,6 +429,43 @@
     background:rgba(20,22,26,.75);backdrop-filter:blur(6px);
     padding:5px 11px;border-radius:3px;
   }
+  .canvas-loader{
+    position:absolute;inset:0;z-index:5;pointer-events:none;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:18px;
+    background:linear-gradient(180deg,rgba(11,12,15,.92),rgba(11,12,15,.78));
+    backdrop-filter:blur(6px);
+    opacity:0;visibility:hidden;transition:opacity .25s ease,visibility .25s ease;
+  }
+  .canvas-loader.show{opacity:1;visibility:visible}
+  .canvas-loader .scan{
+    width:140px;height:140px;border:1px solid var(--brass-deep);border-radius:3px;
+    position:relative;overflow:hidden;
+    background:
+      linear-gradient(var(--grid) 1px,transparent 1px) 0 0/14px 14px,
+      linear-gradient(90deg,var(--grid) 1px,transparent 1px) 0 0/14px 14px;
+  }
+  .canvas-loader .scan::before{
+    content:"";position:absolute;left:0;right:0;height:2px;
+    background:linear-gradient(90deg,transparent,var(--brass-bright),transparent);
+    box-shadow:0 0 14px var(--brass);
+    animation:scanLine 1.4s cubic-bezier(.45,.05,.55,.95) infinite;
+  }
+  .canvas-loader .scan::after{
+    content:"";position:absolute;inset:12px;border:1px dashed var(--brass-deep);
+    opacity:.5;
+  }
+  @keyframes scanLine{
+    0%{top:0}50%{top:calc(100% - 2px)}100%{top:0}
+  }
+  .canvas-loader .load-lbl{
+    font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.22em;
+    color:var(--brass);text-transform:uppercase;
+  }
+  .canvas-loader .load-sub{
+    font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.16em;
+    color:var(--ink-faint);text-transform:uppercase;
+  }
 
   .controls{
     background:var(--surface);border:1px solid var(--border);border-radius:4px;
@@ -904,7 +941,7 @@
     </div>
 
     <div class="app-section" style="border-bottom:none">
-      <button class="prim-btn" onclick="go(3)">Generate 3D Preview →</button>
+      <button class="prim-btn" onclick="window.__generateFlash=true;go(3)">Generate 3D Preview →</button>
       <button class="prim-btn ghost" style="margin-top:10px">Save as Draft</button>
     </div>
   </div></div>
@@ -960,6 +997,11 @@
         <div class="canvas-tag">SCALE 1:50 · <b>SCHEMATIC</b></div>
       </div>
       <div class="drag-hint">⟲ Drag to orbit</div>
+      <div class="canvas-loader" id="canvas-loader">
+        <div class="scan"></div>
+        <div class="load-lbl">Generating 3D Preview</div>
+        <div class="load-sub">Parametric build · CE-2026-0417</div>
+      </div>
     </div>
 
     <div class="controls">
@@ -1240,8 +1282,26 @@ function go(step){
   } else {
     document.getElementById('next-btn').onclick = ()=>go(current+1);
   }
-  // Kick 3D if not inited
-  if(step===3 && !threeInited) initThree();
+  // Kick 3D if not inited (defer a frame so the screen has laid out)
+  if(step===3){
+    const loader = document.getElementById('canvas-loader');
+    if(!threeInited){
+      if(loader) loader.classList.add('show');
+      // two RAFs: one for the display:block to apply, one for layout to settle
+      requestAnimationFrame(()=>requestAnimationFrame(()=>{
+        initThree();
+        // keep the "generating" illusion for a beat, then fade
+        setTimeout(()=>{ if(loader) loader.classList.remove('show'); }, 900);
+      }));
+    } else {
+      // subsequent visits: quick flash only if user clicked the CTA
+      if(loader && window.__generateFlash){
+        window.__generateFlash = false;
+        loader.classList.add('show');
+        setTimeout(()=>loader.classList.remove('show'), 700);
+      }
+    }
+  }
   window.scrollTo({top:0,behavior:'smooth'});
 }
 document.querySelectorAll('.stepdot').forEach(d=>d.onclick=()=>go(+d.dataset.step));
