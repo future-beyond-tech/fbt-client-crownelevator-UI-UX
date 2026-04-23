@@ -1,0 +1,1560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crown Elevator — Lift Intelligence · Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Figtree:ital,wght@0,300..900&family=JetBrains+Mono:wght@300..700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root{
+    --bg:#0B0C0F;
+    --surface:#14161A;
+    --raised:#1B1E23;
+    --hover:#23272E;
+    --border:#262A31;
+    --border-bright:#3B404A;
+    --ink:#ECE7DC;
+    --ink-dim:#9C968B;
+    --ink-faint:#615D56;
+    --brass:#D4A574;
+    --brass-bright:#EAC197;
+    --brass-deep:#9A7650;
+    --ember:#D56B4F;
+    --sage:#8AAE7F;
+    --grid:rgba(255,255,255,.035);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{
+    background:var(--bg);color:var(--ink);
+    font-family:'Figtree',system-ui,sans-serif;
+    font-weight:400;min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    overflow-x:hidden;
+  }
+  body{
+    background-image:
+      radial-gradient(1200px 600px at 15% -10%, rgba(212,165,116,.06), transparent 60%),
+      radial-gradient(900px 600px at 90% 110%, rgba(212,165,116,.035), transparent 60%);
+    background-attachment:fixed;
+    padding-top:34px;padding-bottom:72px;
+  }
+  .serif{font-family:'Fraunces',serif;font-optical-sizing:auto}
+  .mono{font-family:'JetBrains Mono',monospace;font-feature-settings:"ss02"}
+
+  /* --- DEMO BANNER (persistent) --- */
+  .demo-strip{
+    position:fixed;top:0;left:0;right:0;height:34px;z-index:100;
+    background:linear-gradient(90deg,var(--brass-deep) 0%,var(--brass) 30%,var(--brass-bright) 50%,var(--brass) 70%,var(--brass-deep) 100%);
+    color:#1A130A;
+    display:flex;align-items:center;justify-content:center;
+    font-family:'JetBrains Mono',monospace;font-weight:700;
+    font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;
+    box-shadow:0 1px 0 rgba(255,255,255,.1) inset,0 8px 28px -10px rgba(212,165,116,.4);
+  }
+  .demo-strip .pulse{
+    display:inline-block;width:6px;height:6px;border-radius:50%;
+    background:#1A130A;margin:0 12px;
+    animation:pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse{0%,100%{opacity:.25}50%{opacity:1}}
+
+  /* --- GRID UNDERLAY --- */
+  .grid-bg{
+    position:fixed;inset:34px 0 0 0;pointer-events:none;z-index:0;
+    background-image:
+      linear-gradient(var(--grid) 1px,transparent 1px),
+      linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+    background-size:56px 56px;
+    mask-image:radial-gradient(ellipse at center,black 20%,transparent 85%);
+  }
+
+  /* --- TOP BAR --- */
+  .topbar{
+    position:fixed;top:34px;left:0;right:0;z-index:50;
+    padding:20px 40px;display:flex;align-items:center;justify-content:space-between;
+    backdrop-filter:blur(14px) saturate(1.2);
+    background:linear-gradient(180deg,rgba(11,12,15,.85),rgba(11,12,15,.3));
+    border-bottom:1px solid var(--border);
+  }
+  .brand{display:flex;align-items:center;gap:14px}
+  .brand-mark{
+    width:36px;height:36px;border:1px solid var(--brass);border-radius:3px;
+    display:grid;place-items:center;position:relative;
+    background:linear-gradient(180deg,rgba(212,165,116,.15),rgba(212,165,116,.03));
+  }
+  .brand-mark::before,.brand-mark::after{
+    content:"";position:absolute;background:var(--brass);
+  }
+  .brand-mark::before{width:1px;height:18px;}
+  .brand-mark::after{width:10px;height:1px;top:10px;}
+  .brand-mark .c{
+    position:absolute;bottom:7px;width:10px;height:1px;background:var(--brass);
+  }
+  .brand-text .title{font-family:'Fraunces',serif;font-size:16px;font-weight:500;letter-spacing:-.01em;line-height:1}
+  .brand-text .sub{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.16em;color:var(--ink-dim);text-transform:uppercase;margin-top:4px}
+
+  .stepdots{display:flex;align-items:center;gap:6px}
+  .stepdot{
+    display:flex;align-items:center;gap:8px;
+    padding:6px 12px;border-radius:999px;
+    font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.1em;
+    color:var(--ink-faint);cursor:pointer;transition:all .25s;
+    border:1px solid transparent;
+  }
+  .stepdot:hover{color:var(--ink-dim)}
+  .stepdot.active{color:var(--brass-bright);border-color:var(--border-bright);background:var(--raised)}
+  .stepdot .n{font-weight:700}
+  .stepdot.done{color:var(--sage)}
+  .stepdot.done .n::before{content:"✓ ";color:var(--sage)}
+
+  .topbar-right{display:flex;align-items:center;gap:16px}
+  .client-chip{
+    font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;
+    color:var(--ink-dim);text-transform:uppercase;padding:6px 10px;
+    border:1px solid var(--border);border-radius:3px;
+  }
+  .client-chip b{color:var(--ink);font-weight:500}
+
+  /* --- SCREEN CONTAINER --- */
+  main{
+    position:relative;z-index:1;padding-top:96px;
+    min-height:calc(100vh - 106px);
+  }
+  .screen{display:none;animation:fadeUp .5s cubic-bezier(.2,.7,.2,1)}
+  .screen.active{display:block}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+
+  /* ================================================= */
+  /* SCREEN 1: LAUNCH                                  */
+  /* ================================================= */
+  .launch{padding:40px 48px 80px;max-width:1400px;margin:0 auto}
+  .launch .hero{
+    display:grid;grid-template-columns:1.3fr 1fr;gap:80px;align-items:start;
+    padding:40px 0 80px;border-bottom:1px solid var(--border);
+  }
+  .hero .tag{
+    font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.2em;
+    color:var(--brass);text-transform:uppercase;margin-bottom:32px;
+    display:flex;align-items:center;gap:12px;
+  }
+  .hero .tag::before{content:"";width:24px;height:1px;background:var(--brass)}
+  .hero h1{
+    font-family:'Fraunces',serif;font-weight:300;
+    font-size:clamp(48px,6.5vw,88px);line-height:.95;letter-spacing:-.025em;
+    color:var(--ink);margin-bottom:24px;
+  }
+  .hero h1 em{font-style:italic;color:var(--brass);font-weight:400}
+  .hero .lede{
+    font-size:17px;line-height:1.65;color:var(--ink-dim);max-width:560px;
+    margin-bottom:40px;
+  }
+  .hero .lede b{color:var(--ink);font-weight:500}
+
+  .hero-meta{
+    border-left:1px solid var(--border);padding-left:36px;margin-top:16px;
+  }
+  .meta-row{
+    display:flex;justify-content:space-between;padding:14px 0;
+    border-bottom:1px dashed var(--border);
+  }
+  .meta-row:last-child{border-bottom:none}
+  .meta-row .k{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.12em}
+  .meta-row .v{font-size:13.5px;color:var(--ink)}
+  .meta-row .v.brass{color:var(--brass-bright)}
+
+  .launch h2{
+    font-family:'Fraunces',serif;font-weight:400;font-size:28px;letter-spacing:-.015em;
+    margin:64px 0 8px;
+  }
+  .launch .sect-sub{color:var(--ink-dim);font-size:14px;margin-bottom:32px}
+
+  .role-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+  .role-card{
+    background:var(--surface);border:1px solid var(--border);
+    padding:32px 28px;border-radius:4px;cursor:pointer;
+    transition:all .3s cubic-bezier(.2,.7,.2,1);position:relative;overflow:hidden;
+  }
+  .role-card::before{
+    content:"";position:absolute;top:0;left:0;right:0;height:1px;
+    background:linear-gradient(90deg,transparent,var(--brass),transparent);
+    transform:translateX(-100%);transition:transform .6s;
+  }
+  .role-card:hover{
+    background:var(--raised);border-color:var(--border-bright);
+    transform:translateY(-3px);
+  }
+  .role-card:hover::before{transform:translateX(100%)}
+  .role-card .ix{
+    font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--brass);
+    letter-spacing:.2em;margin-bottom:24px;
+  }
+  .role-card h3{
+    font-family:'Fraunces',serif;font-weight:500;font-size:22px;
+    letter-spacing:-.01em;margin-bottom:8px;
+  }
+  .role-card .device{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-faint);letter-spacing:.1em;text-transform:uppercase;margin-bottom:20px}
+  .role-card p{font-size:13.5px;line-height:1.6;color:var(--ink-dim);margin-bottom:24px}
+  .role-card .cta{
+    display:flex;align-items:center;justify-content:space-between;
+    padding-top:20px;border-top:1px dashed var(--border);
+    font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.12em;
+    color:var(--ink);text-transform:uppercase;
+  }
+  .role-card .cta .arrow{transition:transform .3s}
+  .role-card:hover .cta .arrow{transform:translateX(6px);color:var(--brass)}
+
+  .honesty{
+    margin-top:64px;padding:28px 32px;border:1px solid var(--border);
+    border-left:3px solid var(--brass);background:var(--surface);
+    border-radius:0 4px 4px 0;display:grid;grid-template-columns:auto 1fr;gap:28px;align-items:start;
+  }
+  .honesty .label{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.22em;color:var(--brass);text-transform:uppercase;padding-top:2px}
+  .honesty p{font-size:13.5px;line-height:1.65;color:var(--ink-dim)}
+  .honesty p b{color:var(--ink)}
+
+  /* ================================================= */
+  /* SCREEN 2: SURVEYOR                                */
+  /* ================================================= */
+  .surveyor{
+    display:grid;grid-template-columns:auto 1fr;gap:64px;
+    padding:40px 48px 80px;max-width:1400px;margin:0 auto;align-items:start;
+  }
+  .phone{
+    width:380px;height:780px;border:12px solid #0a0b0d;border-radius:42px;
+    background:var(--surface);position:relative;overflow:hidden;
+    box-shadow:
+      0 40px 80px -20px rgba(0,0,0,.6),
+      0 0 0 1px var(--border-bright),
+      inset 0 0 0 1px rgba(255,255,255,.03);
+    margin-top:20px;
+  }
+  .phone::before{
+    content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);
+    width:120px;height:28px;background:#0a0b0d;border-radius:0 0 16px 16px;z-index:5;
+  }
+  .phone-screen{
+    width:100%;height:100%;overflow-y:auto;overflow-x:hidden;
+    scrollbar-width:thin;scrollbar-color:var(--border) transparent;
+  }
+  .phone-screen::-webkit-scrollbar{width:4px}
+  .phone-screen::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+  .app-statusbar{
+    padding:10px 24px 6px;display:flex;justify-content:space-between;
+    font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-dim);
+    padding-top:38px;
+  }
+  .app-header{padding:8px 24px 20px;border-bottom:1px solid var(--border)}
+  .app-header .back{
+    font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-faint);
+    letter-spacing:.12em;text-transform:uppercase;margin-bottom:14px;
+  }
+  .app-header h2{
+    font-family:'Fraunces',serif;font-weight:500;font-size:22px;letter-spacing:-.015em;
+  }
+  .app-header .jobno{
+    font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--brass);
+    letter-spacing:.12em;margin-top:6px;
+  }
+
+  .app-section{padding:20px 24px;border-bottom:1px solid var(--border)}
+  .app-section h4{
+    font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;
+    color:var(--ink-faint);letter-spacing:.16em;text-transform:uppercase;
+    margin-bottom:14px;display:flex;align-items:center;gap:10px;
+  }
+  .app-section h4 .idx{color:var(--brass);font-weight:700}
+
+  .gps-card{
+    background:var(--raised);border:1px solid var(--border);border-radius:6px;
+    padding:14px;display:flex;align-items:center;gap:14px;
+  }
+  .gps-dot{
+    width:10px;height:10px;border-radius:50%;background:var(--sage);
+    position:relative;flex:none;
+    box-shadow:0 0 0 4px rgba(138,174,127,.15);
+    animation:gps 2.4s ease-in-out infinite;
+  }
+  @keyframes gps{0%,100%{box-shadow:0 0 0 4px rgba(138,174,127,.15)}50%{box-shadow:0 0 0 8px rgba(138,174,127,.05)}}
+  .gps-card .coords{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--ink)}
+  .gps-card .place{font-size:11px;color:var(--ink-dim);margin-top:4px}
+
+  .field{margin-bottom:14px}
+  .field label{
+    display:block;font-family:'JetBrains Mono',monospace;font-size:9.5px;
+    color:var(--ink-faint);letter-spacing:.14em;text-transform:uppercase;margin-bottom:6px;
+  }
+  .field input,.field select{
+    width:100%;padding:10px 12px;background:var(--raised);
+    border:1px solid var(--border);border-radius:4px;color:var(--ink);
+    font-family:'Figtree',sans-serif;font-size:13.5px;
+    transition:all .2s;
+  }
+  .field input:focus,.field select:focus{
+    outline:none;border-color:var(--brass);
+    box-shadow:0 0 0 3px rgba(212,165,116,.1);
+  }
+  .row-2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+  .floor-stack{
+    background:var(--raised);border:1px solid var(--border);border-radius:4px;padding:12px;
+  }
+  .floor-row{
+    display:grid;grid-template-columns:32px 1fr 80px 28px;gap:8px;align-items:center;
+    padding:6px 0;border-bottom:1px dashed var(--border);
+  }
+  .floor-row:last-child{border-bottom:none}
+  .floor-row .label{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--brass)}
+  .floor-row input{
+    padding:6px 8px;background:var(--surface);border:1px solid var(--border);
+    border-radius:3px;color:var(--ink);font-family:'Figtree',sans-serif;font-size:12px;
+  }
+  .floor-row .ht{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-dim);text-align:right}
+  .floor-row .x{
+    width:22px;height:22px;display:grid;place-items:center;cursor:pointer;
+    color:var(--ink-faint);font-size:14px;border-radius:3px;transition:all .2s;
+  }
+  .floor-row .x:hover{background:var(--ember);color:var(--bg)}
+  .add-floor{
+    margin-top:10px;padding:10px;width:100%;background:transparent;
+    border:1px dashed var(--border-bright);color:var(--ink-dim);
+    font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.12em;
+    text-transform:uppercase;border-radius:3px;cursor:pointer;transition:all .2s;
+  }
+  .add-floor:hover{border-color:var(--brass);color:var(--brass)}
+
+  .photo-slots{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .photo-slot{
+    aspect-ratio:1;background:var(--raised);border:1px dashed var(--border-bright);
+    border-radius:4px;display:grid;place-items:center;cursor:pointer;
+    color:var(--ink-faint);transition:all .2s;position:relative;overflow:hidden;
+  }
+  .photo-slot:hover{border-color:var(--brass);color:var(--brass)}
+  .photo-slot.filled{
+    border-style:solid;
+    background:linear-gradient(135deg,rgba(212,165,116,.08),rgba(212,165,116,.02));
+    color:var(--brass);
+  }
+  .photo-slot.filled::after{
+    content:"";position:absolute;inset:0;
+    background:
+      radial-gradient(circle at 30% 30%,rgba(212,165,116,.12),transparent 50%),
+      repeating-linear-gradient(45deg,transparent 0 8px,rgba(255,255,255,.02) 8px 9px);
+  }
+  .photo-slot .mark{
+    position:relative;z-index:2;font-family:'JetBrains Mono',monospace;
+    font-size:9.5px;letter-spacing:.1em;
+  }
+
+  .prim-btn{
+    width:100%;padding:14px;background:var(--brass);color:#1A130A;
+    border:none;border-radius:4px;font-family:'JetBrains Mono',monospace;
+    font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;
+    cursor:pointer;transition:all .2s;margin-top:8px;
+  }
+  .prim-btn:hover{background:var(--brass-bright);transform:translateY(-1px)}
+  .prim-btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--border-bright)}
+  .prim-btn.ghost:hover{background:var(--raised);border-color:var(--brass)}
+
+  /* --- Live data panel (right of phone) --- */
+  .livepanel{padding-top:20px}
+  .livepanel h2{
+    font-family:'Fraunces',serif;font-weight:400;font-size:34px;
+    letter-spacing:-.02em;margin-bottom:10px;
+  }
+  .livepanel h2 em{font-style:italic;color:var(--brass)}
+  .livepanel .desc{font-size:14.5px;line-height:1.65;color:var(--ink-dim);max-width:540px;margin-bottom:40px}
+
+  .data-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:4px;overflow:hidden;margin-bottom:32px}
+  .data-cell{background:var(--surface);padding:20px 22px}
+  .data-cell .k{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:var(--ink-faint);text-transform:uppercase;margin-bottom:8px}
+  .data-cell .v{font-family:'Fraunces',serif;font-size:26px;font-weight:400;letter-spacing:-.01em}
+  .data-cell .v .u{font-size:13px;color:var(--ink-dim);margin-left:4px}
+
+  .callout{
+    background:var(--surface);border:1px solid var(--border);border-radius:4px;
+    padding:20px 24px;margin-bottom:20px;
+  }
+  .callout .h{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.16em;color:var(--brass);text-transform:uppercase;margin-bottom:10px}
+  .callout p{font-size:13.5px;line-height:1.6;color:var(--ink-dim)}
+
+  /* ================================================= */
+  /* SCREEN 3: 3D PREVIEW                              */
+  /* ================================================= */
+  .preview{padding:40px 48px 80px;max-width:1600px;margin:0 auto}
+  .preview-header{display:flex;justify-content:space-between;align-items:end;margin-bottom:32px;gap:40px}
+  .preview-header h2{
+    font-family:'Fraunces',serif;font-weight:300;font-size:52px;line-height:1;
+    letter-spacing:-.02em;
+  }
+  .preview-header h2 em{font-style:italic;color:var(--brass)}
+  .preview-header .tag{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:var(--ink-dim);text-transform:uppercase;margin-bottom:16px;display:flex;align-items:center;gap:10px}
+  .preview-header .tag::before{content:"";width:20px;height:1px;background:var(--brass)}
+  .preview-header .desc{font-size:14px;color:var(--ink-dim);max-width:420px;line-height:1.6}
+
+  .preview-layout{display:grid;grid-template-columns:1fr 340px;gap:24px;align-items:start}
+
+  .canvas-wrap{
+    background:var(--surface);border:1px solid var(--border);border-radius:4px;
+    position:relative;aspect-ratio:1.25;overflow:hidden;
+  }
+  .canvas-wrap canvas{display:block;width:100%!important;height:100%!important}
+  .canvas-overlay{
+    position:absolute;inset:16px;pointer-events:none;
+    display:flex;justify-content:space-between;align-items:flex-start;
+  }
+  .canvas-tag{
+    font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;
+    color:var(--ink-dim);text-transform:uppercase;
+    background:rgba(20,22,26,.75);backdrop-filter:blur(6px);
+    padding:6px 10px;border:1px solid var(--border);border-radius:3px;
+  }
+  .canvas-tag b{color:var(--brass)}
+  .canvas-corner{
+    position:absolute;width:28px;height:28px;border:1px solid var(--brass);
+    opacity:.7;pointer-events:none;
+  }
+  .canvas-corner.tl{top:12px;left:12px;border-right:none;border-bottom:none}
+  .canvas-corner.tr{top:12px;right:12px;border-left:none;border-bottom:none}
+  .canvas-corner.bl{bottom:12px;left:12px;border-right:none;border-top:none}
+  .canvas-corner.br{bottom:12px;right:12px;border-left:none;border-top:none}
+  .drag-hint{
+    position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
+    font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;
+    color:var(--ink-faint);text-transform:uppercase;pointer-events:none;
+    background:rgba(20,22,26,.75);backdrop-filter:blur(6px);
+    padding:5px 11px;border-radius:3px;
+  }
+
+  .controls{
+    background:var(--surface);border:1px solid var(--border);border-radius:4px;
+    padding:24px;
+  }
+  .controls h3{
+    font-family:'Fraunces',serif;font-weight:500;font-size:18px;
+    margin-bottom:4px;
+  }
+  .controls .sub{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.16em;color:var(--ink-faint);text-transform:uppercase;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+
+  .control-group{margin-bottom:20px}
+  .control-group .top{display:flex;justify-content:space-between;margin-bottom:10px;align-items:baseline}
+  .control-group .label{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:var(--ink-dim);text-transform:uppercase}
+  .control-group .val{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--brass);font-weight:600}
+  .slider{
+    width:100%;-webkit-appearance:none;appearance:none;
+    height:2px;background:var(--border);border-radius:1px;outline:none;
+  }
+  .slider::-webkit-slider-thumb{
+    -webkit-appearance:none;appearance:none;width:14px;height:14px;
+    border-radius:50%;background:var(--brass);cursor:pointer;
+    border:2px solid var(--bg);box-shadow:0 0 0 1px var(--brass);
+    transition:transform .2s;
+  }
+  .slider::-webkit-slider-thumb:hover{transform:scale(1.2)}
+  .slider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--brass);cursor:pointer;border:2px solid var(--bg);box-shadow:0 0 0 1px var(--brass)}
+
+  .finish-opts{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px}
+  .finish-opt{
+    padding:10px 6px;background:var(--raised);border:1px solid var(--border);
+    border-radius:3px;cursor:pointer;transition:all .2s;text-align:center;
+    font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.1em;
+    color:var(--ink-dim);text-transform:uppercase;
+  }
+  .finish-opt:hover{border-color:var(--border-bright);color:var(--ink)}
+  .finish-opt.active{border-color:var(--brass);color:var(--brass);background:rgba(212,165,116,.05)}
+  .finish-opt .swatch{
+    display:block;width:100%;height:18px;border-radius:2px;margin-bottom:6px;
+  }
+  .swatch.brushed{background:linear-gradient(90deg,#8B8377,#B5AD9F,#8B8377)}
+  .swatch.mirror{background:linear-gradient(135deg,#3A3D43,#72757D,#3A3D43)}
+  .swatch.onyx{background:linear-gradient(135deg,#15161A,#26282E,#15161A)}
+
+  .spec-readout{
+    margin-top:20px;padding-top:20px;border-top:1px solid var(--border);
+    display:grid;grid-template-columns:1fr 1fr;gap:12px;
+  }
+  .spec-item .k{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.14em;color:var(--ink-faint);text-transform:uppercase;margin-bottom:4px}
+  .spec-item .v{font-family:'Fraunces',serif;font-size:18px;font-weight:400}
+  .spec-item .v .u{font-size:11px;color:var(--ink-dim);margin-left:3px}
+
+  /* ================================================= */
+  /* SCREEN 4: REPORT                                  */
+  /* ================================================= */
+  .report-scr{padding:40px 48px 80px;max-width:1500px;margin:0 auto}
+  .report-scr .header{display:flex;justify-content:space-between;align-items:end;margin-bottom:32px;gap:40px}
+  .report-scr h2{font-family:'Fraunces',serif;font-weight:300;font-size:52px;line-height:1;letter-spacing:-.02em}
+  .report-scr h2 em{font-style:italic;color:var(--brass)}
+  .report-scr .tag{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:var(--ink-dim);text-transform:uppercase;margin-bottom:16px;display:flex;align-items:center;gap:10px}
+  .report-scr .tag::before{content:"";width:20px;height:1px;background:var(--brass)}
+
+  .report-layout{display:grid;grid-template-columns:1fr 320px;gap:24px;align-items:start}
+
+  .doc{
+    background:#F5F1E8;color:#1F1C16;
+    padding:56px 64px;border-radius:3px;
+    box-shadow:
+      0 30px 60px -15px rgba(0,0,0,.5),
+      0 0 0 1px rgba(212,165,116,.2);
+    position:relative;overflow:hidden;
+    font-family:'Figtree',sans-serif;
+    aspect-ratio:1/1.32;
+  }
+  .doc::before{
+    content:"SPECIMEN";position:absolute;top:45%;left:50%;
+    transform:translate(-50%,-50%) rotate(-28deg);
+    font-family:'Fraunces',serif;font-size:140px;font-weight:200;
+    color:rgba(212,165,116,.09);letter-spacing:.1em;pointer-events:none;
+    white-space:nowrap;
+  }
+  .doc-head{
+    display:flex;justify-content:space-between;align-items:flex-start;
+    padding-bottom:20px;border-bottom:2px solid #1F1C16;margin-bottom:24px;
+    position:relative;
+  }
+  .doc-brand .logo{
+    font-family:'Fraunces',serif;font-weight:400;font-size:22px;letter-spacing:.02em;
+  }
+  .doc-brand .logo em{font-style:italic;color:#9A7650}
+  .doc-brand .tagline{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.2em;color:#6B635A;text-transform:uppercase;margin-top:6px}
+  .doc-ref{text-align:right;font-family:'JetBrains Mono',monospace;font-size:10px;color:#6B635A;letter-spacing:.08em;line-height:1.7}
+  .doc-ref b{color:#1F1C16}
+
+  .doc h1{font-family:'Fraunces',serif;font-weight:300;font-size:28px;letter-spacing:-.01em;margin-bottom:6px;position:relative}
+  .doc h1 em{font-style:italic;color:#9A7650}
+  .doc .sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:#6B635A;letter-spacing:.14em;text-transform:uppercase;margin-bottom:24px;position:relative}
+
+  .doc .two-col{display:grid;grid-template-columns:1fr 1fr;gap:36px;position:relative}
+  .doc h3{font-family:'Fraunces',serif;font-weight:500;font-size:13px;letter-spacing:.02em;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid rgba(31,28,22,.2)}
+  .doc .spec-list{list-style:none;font-size:11.5px;line-height:1.9}
+  .doc .spec-list li{display:flex;justify-content:space-between;border-bottom:1px dashed rgba(31,28,22,.15);padding:2px 0}
+  .doc .spec-list li .k{color:#6B635A}
+  .doc .spec-list li .v{font-weight:500}
+  .doc .spec-list li .v.accent{color:#9A7650;font-weight:600}
+
+  .doc .render-thumb{
+    width:100%;aspect-ratio:1.3;background:#1F1C16;border-radius:2px;
+    margin:20px 0;position:relative;overflow:hidden;
+    border:1px solid #9A7650;
+  }
+  .doc-footer{
+    position:absolute;bottom:28px;left:64px;right:64px;
+    display:flex;justify-content:space-between;align-items:center;
+    font-family:'JetBrains Mono',monospace;font-size:9px;color:#6B635A;
+    letter-spacing:.14em;text-transform:uppercase;
+    padding-top:14px;border-top:1px solid rgba(31,28,22,.2);
+  }
+
+  .deliver{
+    background:var(--surface);border:1px solid var(--border);border-radius:4px;
+    padding:24px;position:sticky;top:130px;
+  }
+  .deliver h3{font-family:'Fraunces',serif;font-weight:500;font-size:18px;margin-bottom:4px}
+  .deliver .sub{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.16em;color:var(--ink-faint);text-transform:uppercase;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+
+  .channel{
+    display:flex;align-items:center;gap:14px;padding:14px;
+    background:var(--raised);border:1px solid var(--border);border-radius:4px;
+    margin-bottom:10px;cursor:pointer;transition:all .2s;
+  }
+  .channel:hover{border-color:var(--brass);background:var(--hover)}
+  .channel .icon{
+    width:40px;height:40px;display:grid;place-items:center;
+    background:var(--surface);border-radius:3px;
+    font-family:'Fraunces',serif;font-weight:500;font-size:16px;color:var(--brass);
+  }
+  .channel .info .nm{font-size:13px;color:var(--ink);margin-bottom:2px}
+  .channel .info .to{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-dim)}
+  .channel .status{
+    margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:9.5px;
+    letter-spacing:.12em;color:var(--ink-faint);text-transform:uppercase;
+  }
+  .channel.sent .status{color:var(--sage)}
+
+  .deliver .prim-btn{margin-top:14px}
+
+  /* ================================================= */
+  /* SCREEN 5: APPROVAL                                */
+  /* ================================================= */
+  .approval{padding:40px 48px 80px;max-width:1400px;margin:0 auto;display:grid;grid-template-columns:1fr auto;gap:80px;align-items:start}
+  .approval .left{padding-top:20px}
+  .approval h2{font-family:'Fraunces',serif;font-weight:300;font-size:52px;letter-spacing:-.02em;line-height:1;margin-bottom:16px}
+  .approval h2 em{font-style:italic;color:var(--brass)}
+  .approval .tag{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:var(--ink-dim);text-transform:uppercase;margin-bottom:16px;display:flex;align-items:center;gap:10px}
+  .approval .tag::before{content:"";width:20px;height:1px;background:var(--brass)}
+  .approval .desc{font-size:14.5px;line-height:1.65;color:var(--ink-dim);max-width:520px;margin-bottom:40px}
+
+  .flow{margin-bottom:32px}
+  .flow-step{
+    display:grid;grid-template-columns:40px 1fr;gap:18px;padding:18px 0;
+    border-bottom:1px solid var(--border);
+  }
+  .flow-step:last-child{border-bottom:none}
+  .flow-step .num{
+    width:32px;height:32px;border:1px solid var(--border);border-radius:50%;
+    display:grid;place-items:center;font-family:'JetBrains Mono',monospace;
+    font-size:11px;color:var(--ink-faint);margin-top:2px;
+  }
+  .flow-step.done .num{border-color:var(--sage);color:var(--sage)}
+  .flow-step.active .num{border-color:var(--brass);color:var(--brass);background:rgba(212,165,116,.08)}
+  .flow-step .content{padding-top:2px}
+  .flow-step .nm{font-family:'Fraunces',serif;font-size:17px;font-weight:500;margin-bottom:4px}
+  .flow-step .meta{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-faint);letter-spacing:.1em}
+  .flow-step.done .meta{color:var(--sage)}
+
+  /* Owner phone */
+  .owner-phone{
+    width:340px;height:720px;border:12px solid #0a0b0d;border-radius:42px;
+    background:var(--surface);position:relative;overflow:hidden;
+    box-shadow:0 40px 80px -20px rgba(0,0,0,.6),0 0 0 1px var(--border-bright);
+  }
+  .owner-phone::before{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);width:120px;height:28px;background:#0a0b0d;border-radius:0 0 16px 16px;z-index:5}
+  .owner-screen{width:100%;height:100%;overflow-y:auto;scrollbar-width:none}
+  .owner-screen::-webkit-scrollbar{display:none}
+
+  .owner-head{padding:38px 20px 20px;border-bottom:1px solid var(--border);text-align:center}
+  .owner-head .from{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--ink-faint);letter-spacing:.14em;text-transform:uppercase;margin-bottom:10px}
+  .owner-head .title{font-family:'Fraunces',serif;font-size:18px;font-weight:500;letter-spacing:-.01em}
+  .owner-head .sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--brass);letter-spacing:.12em;margin-top:6px}
+
+  .owner-block{padding:20px;border-bottom:1px solid var(--border)}
+  .owner-block .blk-title{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.16em;color:var(--ink-faint);text-transform:uppercase;margin-bottom:12px}
+  .owner-3d{
+    aspect-ratio:1.2;background:#0F1014;border:1px solid var(--border);
+    border-radius:4px;position:relative;overflow:hidden;
+  }
+  .owner-3d::before{
+    content:"3D PREVIEW";position:absolute;top:50%;left:50%;
+    transform:translate(-50%,-50%);font-family:'JetBrains Mono',monospace;
+    font-size:9.5px;letter-spacing:.2em;color:var(--brass);
+  }
+  .owner-3d::after{
+    content:"";position:absolute;inset:20% 35%;
+    border:1px solid var(--brass);opacity:.4;
+    background:repeating-linear-gradient(90deg,transparent 0 10px,rgba(212,165,116,.08) 10px 11px);
+  }
+
+  .owner-specs{font-size:12.5px;line-height:1.9}
+  .owner-specs li{display:flex;justify-content:space-between;border-bottom:1px dashed var(--border);padding:4px 0;list-style:none}
+  .owner-specs li .k{color:var(--ink-dim);font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.08em}
+  .owner-specs li .v{color:var(--ink)}
+  .owner-specs li .v.brass{color:var(--brass)}
+
+  .owner-actions{padding:20px;display:grid;gap:10px}
+  .approve-btn{
+    padding:14px;background:var(--brass);color:#1A130A;border:none;border-radius:4px;
+    font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;
+    letter-spacing:.18em;text-transform:uppercase;cursor:pointer;transition:all .2s;
+  }
+  .approve-btn:hover{background:var(--brass-bright)}
+  .approve-btn.secondary{background:transparent;color:var(--ink);border:1px solid var(--border-bright)}
+  .approve-btn.secondary:hover{border-color:var(--ink)}
+
+  .approved-state{
+    padding:32px 20px;text-align:center;display:none;
+  }
+  .approved-state.show{display:block}
+  .approved-state .mark{
+    width:60px;height:60px;margin:0 auto 16px;border-radius:50%;
+    border:2px solid var(--sage);display:grid;place-items:center;color:var(--sage);
+    font-size:26px;animation:pop .5s cubic-bezier(.2,1.5,.5,1);
+  }
+  @keyframes pop{from{transform:scale(.5);opacity:0}to{transform:scale(1);opacity:1}}
+  .approved-state h4{font-family:'Fraunces',serif;font-size:20px;font-weight:500;margin-bottom:6px}
+  .approved-state p{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink-dim);letter-spacing:.08em}
+
+  /* ================================================= */
+  /* BOTTOM NAV                                        */
+  /* ================================================= */
+  .bottombar{
+    position:fixed;bottom:0;left:0;right:0;z-index:50;
+    padding:16px 40px;display:flex;align-items:center;justify-content:space-between;
+    backdrop-filter:blur(14px) saturate(1.2);
+    background:linear-gradient(0deg,rgba(11,12,15,.9),rgba(11,12,15,.5));
+    border-top:1px solid var(--border);
+  }
+  .nav-btn{
+    padding:10px 20px;background:transparent;border:1px solid var(--border);
+    color:var(--ink);border-radius:3px;cursor:pointer;transition:all .2s;
+    font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.12em;
+    text-transform:uppercase;display:flex;align-items:center;gap:10px;
+  }
+  .nav-btn:hover:not(:disabled){background:var(--raised);border-color:var(--border-bright)}
+  .nav-btn:disabled{opacity:.3;cursor:not-allowed}
+  .nav-btn.primary{background:var(--brass);color:#1A130A;border-color:var(--brass);font-weight:700}
+  .nav-btn.primary:hover{background:var(--brass-bright);border-color:var(--brass-bright)}
+  .nav-progress{
+    font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.16em;
+    color:var(--ink-faint);text-transform:uppercase;
+  }
+  .nav-progress b{color:var(--brass)}
+
+  /* --- responsive tweaks --- */
+  @media (max-width:1200px){
+    .hero{grid-template-columns:1fr!important}
+    .surveyor{grid-template-columns:1fr;justify-items:center}
+    .preview-layout,.report-layout{grid-template-columns:1fr}
+    .approval{grid-template-columns:1fr;justify-items:center}
+  }
+  @media (max-width:720px){
+    .topbar{padding:14px 20px;flex-wrap:wrap;gap:12px}
+    .stepdots{order:3;width:100%;justify-content:center;overflow-x:auto}
+    main{padding-top:140px}
+    .launch,.surveyor,.preview,.report-scr,.approval{padding:24px 20px 60px}
+    .role-grid{grid-template-columns:1fr}
+    .phone{width:320px;height:680px}
+    .hero h1{font-size:44px}
+  }
+</style>
+</head>
+<body>
+
+<!-- === DEMO BANNER (always visible) === -->
+<div class="demo-strip">
+  <span class="pulse"></span>
+  PROTOTYPE · SAMPLE DATA · NOT THE FINISHED PRODUCT
+  <span class="pulse"></span>
+</div>
+
+<div class="grid-bg"></div>
+
+<!-- === TOP BAR === -->
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark"><span class="c"></span></div>
+    <div class="brand-text">
+      <div class="title">Crown <em class="serif" style="font-style:italic">Lift Intelligence</em></div>
+      <div class="sub">Survey · Design · Deliver</div>
+    </div>
+  </div>
+
+  <nav class="stepdots" id="steps">
+    <button class="stepdot active" data-step="1"><span class="n">01</span> Overview</button>
+    <button class="stepdot" data-step="2"><span class="n">02</span> Site Survey</button>
+    <button class="stepdot" data-step="3"><span class="n">03</span> 3D Preview</button>
+    <button class="stepdot" data-step="4"><span class="n">04</span> Report</button>
+    <button class="stepdot" data-step="5"><span class="n">05</span> Approval</button>
+  </nav>
+
+  <div class="topbar-right">
+    <span class="client-chip">Built for <b>Crown Elevator</b> · by FBT</span>
+  </div>
+</header>
+
+<!-- === MAIN === -->
+<main>
+
+<!-- ============================================ -->
+<!-- SCREEN 1: LAUNCH                             -->
+<!-- ============================================ -->
+<section class="screen active launch" data-screen="1">
+  <div class="hero">
+    <div>
+      <div class="tag">Prototype v0.4 · Interactive Walkthrough</div>
+      <h1 class="serif">The <em>survey to install</em><br>workflow, end&#8209;to&#8209;end.</h1>
+      <p class="lede">A field surveyor arrives at the customer's building with a phone. They capture GPS, floor counts, shaft dimensions, and photos. Minutes later a <b>parametric 3D preview</b> appears. A professional <b>report</b> lands on the owner's WhatsApp. The owner <b>approves</b> with a thumb. Every step is tracked, every signature is stored, every dimension flows downstream to manufacturing.</p>
+      <p class="lede" style="color:var(--ink-faint);font-size:14px">This demo is a clickable preview — you can move through the five stages in order or jump around. Sample data is pre-filled so nothing is blocking. The 3D model is live and parametric; change the sliders and watch it respond.</p>
+    </div>
+    <div class="hero-meta">
+      <div class="meta-row"><span class="k">Client</span><span class="v">Crown Elevator Pvt. Ltd.</span></div>
+      <div class="meta-row"><span class="k">Engagement</span><span class="v">Lift Survey & Reporting Platform</span></div>
+      <div class="meta-row"><span class="k">Delivered by</span><span class="v brass">Future Beyond Technology</span></div>
+      <div class="meta-row"><span class="k">Stack</span><span class="v mono" style="font-size:12px">Next.js · .NET 8 · Three.js · PostgreSQL</span></div>
+      <div class="meta-row"><span class="k">Status</span><span class="v">Scoping / Pre-build</span></div>
+      <div class="meta-row"><span class="k">Prototype date</span><span class="v mono" style="font-size:12px">24 Apr 2026</span></div>
+    </div>
+  </div>
+
+  <h2 class="serif">Three <em style="font-style:italic;color:var(--brass)">roles</em>, one workflow.</h2>
+  <p class="sect-sub">Each persona sees only what they need. This walkthrough stitches them together so Crown can see the whole chain.</p>
+
+  <div class="role-grid">
+    <div class="role-card" data-jump="2">
+      <div class="ix">01 · Field</div>
+      <h3>Surveyor</h3>
+      <div class="device">Mobile · On-site</div>
+      <p>Drops a GPS pin, enters floor count and shaft dimensions, shoots 3 site photos, picks load capacity and finish. Under three minutes per site.</p>
+      <div class="cta">Open Field App <span class="arrow">→</span></div>
+    </div>
+    <div class="role-card" data-jump="3">
+      <div class="ix">02 · Engineering</div>
+      <h3>Designer</h3>
+      <div class="device">Desktop · In-office</div>
+      <p>The capture auto-generates a parametric 3D model. Sliders for floors, cabin size, finish. The model updates instantly and feeds the quote.</p>
+      <div class="cta">Open 3D Preview <span class="arrow">→</span></div>
+    </div>
+    <div class="role-card" data-jump="5">
+      <div class="ix">03 · Customer</div>
+      <h3>Building Owner</h3>
+      <div class="device">Mobile · Anywhere</div>
+      <p>Gets a branded report on WhatsApp. Taps through the spec. Approves, requests changes, or declines — all on their phone, stored as a digital signature.</p>
+      <div class="cta">Open Approval View <span class="arrow">→</span></div>
+    </div>
+  </div>
+
+  <aside class="honesty">
+    <div class="label">What this is / isn't</div>
+    <p><b>What it is:</b> a polished, clickable representation of the five key user journeys — enough for Crown Elevator to see, feel, and sign off on the scope before we build. Every screen shown here becomes a real feature in the shipped platform.<br><br><b>What it isn't (yet):</b> a working backend, a real database, real surveys, real file uploads, or the finished visual design system. Some advanced flows (surveyor check-in, manager dashboards, factory handoff) are out of view. The 3D model is live but intentionally schematic — the production model will be photorealistic with cabin interiors, door types, and material finishes.</p>
+  </aside>
+</section>
+
+<!-- ============================================ -->
+<!-- SCREEN 2: SURVEYOR                           -->
+<!-- ============================================ -->
+<section class="screen surveyor" data-screen="2">
+  <!-- Phone -->
+  <div class="phone"><div class="phone-screen">
+    <div class="app-statusbar">
+      <span>9:41</span>
+      <span>•••• 5G  ▮▮▮▮</span>
+    </div>
+    <div class="app-header">
+      <div class="back">← Jobs / Today</div>
+      <h2 class="serif">New Site Survey</h2>
+      <div class="jobno">JOB #CE-2026-0417</div>
+    </div>
+
+    <div class="app-section">
+      <h4><span class="idx">01</span> Site Location</h4>
+      <div class="gps-card">
+        <div class="gps-dot"></div>
+        <div>
+          <div class="coords">13.0475° N · 80.2089° E</div>
+          <div class="place">Anna Nagar West, Chennai</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="app-section">
+      <h4><span class="idx">02</span> Building Basics</h4>
+      <div class="field">
+        <label>Customer / Builder</label>
+        <input type="text" value="Sundar Construction" id="surv-builder">
+      </div>
+      <div class="row-2">
+        <div class="field"><label>Building type</label>
+          <select><option>Residential Apartment</option><option>Commercial Tower</option><option>Hospital</option></select>
+        </div>
+        <div class="field"><label>Usage class</label>
+          <select><option>Passenger</option><option>Service</option><option>Stretcher</option></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="app-section">
+      <h4><span class="idx">03</span> Shaft & Floors</h4>
+      <div class="row-2">
+        <div class="field"><label>Shaft width (mm)</label><input type="number" value="1800" id="surv-w"></div>
+        <div class="field"><label>Shaft depth (mm)</label><input type="number" value="2000" id="surv-d"></div>
+      </div>
+      <div class="floor-stack" id="floor-stack">
+        <div class="floor-row"><span class="label">G</span><input value="Ground — Lobby"><span class="ht mono">3200mm</span><span class="x">×</span></div>
+        <div class="floor-row"><span class="label">01</span><input value="First Floor"><span class="ht mono">3000mm</span><span class="x">×</span></div>
+        <div class="floor-row"><span class="label">02</span><input value="Second Floor"><span class="ht mono">3000mm</span><span class="x">×</span></div>
+        <div class="floor-row"><span class="label">03</span><input value="Third Floor"><span class="ht mono">3000mm</span><span class="x">×</span></div>
+        <div class="floor-row"><span class="label">04</span><input value="Fourth Floor"><span class="ht mono">3000mm</span><span class="x">×</span></div>
+        <div class="floor-row"><span class="label">05</span><input value="Fifth — Terrace Access"><span class="ht mono">3200mm</span><span class="x">×</span></div>
+      </div>
+      <button class="add-floor">+ Add floor</button>
+    </div>
+
+    <div class="app-section">
+      <h4><span class="idx">04</span> Specifications</h4>
+      <div class="row-2">
+        <div class="field"><label>Capacity</label><select><option>6 persons · 408 kg</option><option>8 persons · 544 kg</option><option>13 persons · 884 kg</option></select></div>
+        <div class="field"><label>Speed</label><select><option>1.0 m/s</option><option>1.5 m/s</option><option>1.75 m/s</option></select></div>
+      </div>
+      <div class="field"><label>Cabin finish</label>
+        <select><option>Brushed stainless</option><option>Mirror finish</option><option>Onyx laminate</option></select>
+      </div>
+    </div>
+
+    <div class="app-section">
+      <h4><span class="idx">05</span> Site Photography</h4>
+      <div class="photo-slots">
+        <div class="photo-slot filled"><span class="mark">IMG_01</span></div>
+        <div class="photo-slot filled"><span class="mark">IMG_02</span></div>
+        <div class="photo-slot filled"><span class="mark">IMG_03</span></div>
+      </div>
+    </div>
+
+    <div class="app-section" style="border-bottom:none">
+      <button class="prim-btn" onclick="go(3)">Generate 3D Preview →</button>
+      <button class="prim-btn ghost" style="margin-top:10px">Save as Draft</button>
+    </div>
+  </div></div>
+
+  <!-- Live panel -->
+  <div class="livepanel">
+    <div class="tag mono" style="font-size:11px;letter-spacing:.16em;color:var(--ink-dim);text-transform:uppercase;margin-bottom:16px;display:flex;align-items:center;gap:10px">
+      <span style="display:inline-block;width:20px;height:1px;background:var(--brass)"></span>
+      Stage 02 · Field capture
+    </div>
+    <h2 class="serif">A surveyor's morning, <em>made quiet.</em></h2>
+    <p class="desc">The old workflow: paper forms, blurry photos, spec sheets misfiled, quotes rewritten. The new workflow: one app, three minutes, everything structured and timestamped. The capture feeds every downstream system — 3D, report, quote, factory work order.</p>
+
+    <div class="data-grid">
+      <div class="data-cell"><div class="k">Capture time</div><div class="v">2:41<span class="u">min</span></div></div>
+      <div class="data-cell"><div class="k">Fields captured</div><div class="v">24</div></div>
+      <div class="data-cell"><div class="k">Data quality score</div><div class="v" style="color:var(--sage)">96<span class="u">%</span></div></div>
+      <div class="data-cell"><div class="k">Offline capable</div><div class="v" style="color:var(--brass)">Yes</div></div>
+    </div>
+
+    <div class="callout">
+      <div class="h">Why this matters for Crown</div>
+      <p>Today a quote takes 3–5 days and bounces between surveyor, office, and drafting. With the capture structured at source, the same output is generated in minutes. Mistakes at the quotation stage — wrong shaft dimensions, missed floor, forgotten spec — are caught before they reach the factory floor.</p>
+    </div>
+    <div class="callout">
+      <div class="h">Demo caveat</div>
+      <p>Fields above are pre-populated with plausible values. In the live product the GPS, camera, and photo upload invoke the device's native permissions; here they're illustrations.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ -->
+<!-- SCREEN 3: 3D PREVIEW                         -->
+<!-- ============================================ -->
+<section class="screen preview" data-screen="3">
+  <div class="preview-header">
+    <div>
+      <div class="tag">Stage 03 · Parametric Preview</div>
+      <h2 class="serif">From capture to <em>cabin,</em><br>in real time.</h2>
+    </div>
+    <p class="desc">The model below is driven live by the survey data. Change floors or cabin dimensions on the right — the geometry, specs and quote update together. Drag to orbit.</p>
+  </div>
+
+  <div class="preview-layout">
+    <div class="canvas-wrap">
+      <canvas id="three-canvas"></canvas>
+      <div class="canvas-corner tl"></div>
+      <div class="canvas-corner tr"></div>
+      <div class="canvas-corner bl"></div>
+      <div class="canvas-corner br"></div>
+      <div class="canvas-overlay">
+        <div class="canvas-tag">MODEL · <b>CE-2026-0417</b></div>
+        <div class="canvas-tag">SCALE 1:50 · <b>SCHEMATIC</b></div>
+      </div>
+      <div class="drag-hint">⟲ Drag to orbit</div>
+    </div>
+
+    <div class="controls">
+      <h3 class="serif">Live Parameters</h3>
+      <div class="sub">Auto-sync · <span style="color:var(--sage)">●</span> Connected</div>
+
+      <div class="control-group">
+        <div class="top"><span class="label">Floors</span><span class="val" id="val-floors">6</span></div>
+        <input type="range" class="slider" min="2" max="14" value="6" id="ctrl-floors">
+      </div>
+      <div class="control-group">
+        <div class="top"><span class="label">Shaft width</span><span class="val" id="val-width">1800 mm</span></div>
+        <input type="range" class="slider" min="1200" max="2400" step="50" value="1800" id="ctrl-width">
+      </div>
+      <div class="control-group">
+        <div class="top"><span class="label">Shaft depth</span><span class="val" id="val-depth">2000 mm</span></div>
+        <input type="range" class="slider" min="1400" max="2600" step="50" value="2000" id="ctrl-depth">
+      </div>
+      <div class="control-group">
+        <div class="top"><span class="label">Cabin position</span><span class="val" id="val-pos">Ground</span></div>
+        <input type="range" class="slider" min="0" max="100" value="0" id="ctrl-pos">
+      </div>
+
+      <div class="control-group" style="margin-bottom:0">
+        <div class="top" style="margin-bottom:8px"><span class="label">Cabin finish</span><span class="val" id="val-finish">Brushed</span></div>
+        <div class="finish-opts">
+          <div class="finish-opt active" data-finish="brushed"><span class="swatch brushed"></span>Brushed</div>
+          <div class="finish-opt" data-finish="mirror"><span class="swatch mirror"></span>Mirror</div>
+          <div class="finish-opt" data-finish="onyx"><span class="swatch onyx"></span>Onyx</div>
+        </div>
+      </div>
+
+      <div class="spec-readout">
+        <div class="spec-item"><div class="k">Travel</div><div class="v" id="val-travel">18.2<span class="u">m</span></div></div>
+        <div class="spec-item"><div class="k">Cabin area</div><div class="v" id="val-area">2.88<span class="u">m²</span></div></div>
+        <div class="spec-item"><div class="k">Est. load</div><div class="v">544<span class="u">kg</span></div></div>
+        <div class="spec-item"><div class="k">Quote (est.)</div><div class="v" style="color:var(--brass)" id="val-quote">₹14.8<span class="u">L</span></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ -->
+<!-- SCREEN 4: REPORT                             -->
+<!-- ============================================ -->
+<section class="screen report-scr" data-screen="4">
+  <div class="header">
+    <div>
+      <div class="tag">Stage 04 · Generated Report</div>
+      <h2 class="serif">One PDF, <em>anywhere</em><br>the owner is.</h2>
+    </div>
+    <p class="desc" style="max-width:420px;font-size:14px;color:var(--ink-dim);line-height:1.6">The capture and 3D model render into a branded proposal. Delivered on the channel the owner actually reads — WhatsApp by default, email as record.</p>
+  </div>
+
+  <div class="report-layout">
+    <div class="doc">
+      <div class="doc-head">
+        <div class="doc-brand">
+          <div class="logo">Crown <em>Elevator</em></div>
+          <div class="tagline">Vertical Transport · Since 1994</div>
+        </div>
+        <div class="doc-ref">
+          <div>REF <b>CE-2026-0417</b></div>
+          <div>DATE <b>24.04.2026</b></div>
+          <div>SURVEYOR <b>R. KARTHIK</b></div>
+        </div>
+      </div>
+
+      <h1 class="serif">Proposal &amp; <em>Specification</em></h1>
+      <div class="sub">Sundar Construction · Anna Nagar West, Chennai</div>
+
+      <div class="two-col">
+        <div>
+          <h3 class="serif">Site &amp; Shaft</h3>
+          <ul class="spec-list">
+            <li><span class="k">Floors served</span><span class="v">G + 5 (6 stops)</span></li>
+            <li><span class="k">Total travel</span><span class="v">18.2 m</span></li>
+            <li><span class="k">Shaft W × D</span><span class="v">1800 × 2000 mm</span></li>
+            <li><span class="k">Pit depth</span><span class="v">1500 mm</span></li>
+            <li><span class="k">Overhead</span><span class="v">4400 mm</span></li>
+            <li><span class="k">Building type</span><span class="v">Residential</span></li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="serif">Lift Specification</h3>
+          <ul class="spec-list">
+            <li><span class="k">Capacity</span><span class="v">8 persons · 544 kg</span></li>
+            <li><span class="k">Speed</span><span class="v">1.0 m/s</span></li>
+            <li><span class="k">Drive</span><span class="v">Gearless VVVF</span></li>
+            <li><span class="k">Cabin finish</span><span class="v accent">Brushed stainless</span></li>
+            <li><span class="k">Door type</span><span class="v">Centre opening</span></li>
+            <li><span class="k">Investment</span><span class="v accent">₹ 14,80,000</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="render-thumb">
+        <svg viewBox="0 0 400 300" style="width:100%;height:100%;display:block">
+          <defs>
+            <pattern id="grid-doc" width="20" height="20" patternUnits="userSpaceOnUse">
+              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(212,165,116,.15)" stroke-width=".5"/>
+            </pattern>
+          </defs>
+          <rect width="400" height="300" fill="url(#grid-doc)"/>
+          <g stroke="#D4A574" stroke-width="1" fill="none" opacity=".8">
+            <rect x="140" y="40" width="120" height="220"/>
+            <line x1="140" y1="80" x2="260" y2="80"/>
+            <line x1="140" y1="120" x2="260" y2="120"/>
+            <line x1="140" y1="160" x2="260" y2="160"/>
+            <line x1="140" y1="200" x2="260" y2="200"/>
+            <line x1="140" y1="240" x2="260" y2="240"/>
+            <rect x="160" y="220" width="80" height="40" fill="rgba(212,165,116,.15)"/>
+          </g>
+          <g fill="#D4A574" font-family="JetBrains Mono" font-size="8" opacity=".7">
+            <text x="270" y="48">G+5</text>
+            <text x="270" y="248">GROUND</text>
+            <text x="20" y="152">1800mm</text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="doc-footer">
+        <span>Crown Elevator Pvt. Ltd.</span>
+        <span>SPECIMEN · NOT A BINDING QUOTE</span>
+        <span>Page 1 of 4</span>
+      </div>
+    </div>
+
+    <div class="deliver">
+      <h3 class="serif">Delivery</h3>
+      <div class="sub">Channels · Pick any</div>
+
+      <div class="channel sent">
+        <div class="icon">W</div>
+        <div class="info">
+          <div class="nm">WhatsApp Business</div>
+          <div class="to">+91 98840 12345</div>
+        </div>
+        <div class="status">Sent · 2m</div>
+      </div>
+      <div class="channel">
+        <div class="icon">@</div>
+        <div class="info">
+          <div class="nm">Email · PDF attachment</div>
+          <div class="to">sundar@sundarbuild.in</div>
+        </div>
+        <div class="status">Send</div>
+      </div>
+      <div class="channel">
+        <div class="icon">↓</div>
+        <div class="info">
+          <div class="nm">Download PDF</div>
+          <div class="to">CE-2026-0417.pdf · 2.4 MB</div>
+        </div>
+        <div class="status">Save</div>
+      </div>
+
+      <button class="prim-btn" onclick="go(5)">Forward for Approval →</button>
+      <button class="prim-btn ghost" style="margin-top:8px">Regenerate</button>
+
+      <div style="margin-top:20px;padding-top:16px;border-top:1px dashed var(--border);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--ink-faint);letter-spacing:.08em;line-height:1.7">
+        <div style="color:var(--brass);margin-bottom:6px;letter-spacing:.14em">DEMO NOTE</div>
+        In production, the WhatsApp message uses Crown's verified business number via WhatsApp Cloud API. Delivery status and read receipts are tracked in the CRM.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ -->
+<!-- SCREEN 5: APPROVAL                           -->
+<!-- ============================================ -->
+<section class="screen approval" data-screen="5">
+  <div class="left">
+    <div class="tag">Stage 05 · Owner Approval</div>
+    <h2 class="serif">Signed with a <em>thumb.</em></h2>
+    <p class="desc">The customer never installs an app, never signs a printout, never calls back three days later. They tap the WhatsApp link, scroll the spec, approve. The office gets a timestamped, IP-logged, legally admissible signature.</p>
+
+    <div class="flow">
+      <div class="flow-step done">
+        <div class="num">1</div>
+        <div class="content"><div class="nm">Report delivered</div><div class="meta">WHATSAPP · 24 APR 10:42</div></div>
+      </div>
+      <div class="flow-step done">
+        <div class="num">2</div>
+        <div class="content"><div class="nm">Opened by owner</div><div class="meta">READ · 24 APR 11:07</div></div>
+      </div>
+      <div class="flow-step active">
+        <div class="num">3</div>
+        <div class="content"><div class="nm">Awaiting signature</div><div class="meta" id="flow-3-meta">IN PROGRESS</div></div>
+      </div>
+      <div class="flow-step" id="flow-step-4">
+        <div class="num">4</div>
+        <div class="content"><div class="nm">Factory work order</div><div class="meta">QUEUED</div></div>
+      </div>
+    </div>
+
+    <div class="callout" style="background:var(--surface);border:1px solid var(--border);padding:20px 24px;border-radius:4px">
+      <div class="h" style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.16em;color:var(--brass);text-transform:uppercase;margin-bottom:10px">Tap approve on the phone →</div>
+      <p style="font-size:13.5px;color:var(--ink-dim);line-height:1.6">The rest of the chain unlocks automatically. The factory receives the work order, procurement starts, the surveyor's next visit is scheduled.</p>
+    </div>
+  </div>
+
+  <!-- Owner phone -->
+  <div class="owner-phone"><div class="owner-screen" id="owner-screen">
+    <div class="owner-head">
+      <div class="from">From · Crown Elevator</div>
+      <div class="title">Your Lift Proposal</div>
+      <div class="sub mono">REF CE-2026-0417</div>
+    </div>
+    <div class="owner-block">
+      <div class="blk-title">3D Preview</div>
+      <div class="owner-3d"></div>
+    </div>
+    <div class="owner-block">
+      <div class="blk-title">Key Specs</div>
+      <ul class="owner-specs">
+        <li><span class="k">Floors</span><span class="v">G + 5</span></li>
+        <li><span class="k">Capacity</span><span class="v">8 persons</span></li>
+        <li><span class="k">Speed</span><span class="v">1.0 m/s</span></li>
+        <li><span class="k">Finish</span><span class="v">Brushed SS</span></li>
+        <li><span class="k">Investment</span><span class="v brass">₹ 14,80,000</span></li>
+        <li><span class="k">Delivery</span><span class="v">10–12 weeks</span></li>
+      </ul>
+    </div>
+    <div class="owner-actions" id="owner-actions">
+      <button class="approve-btn" onclick="approveNow()">Approve Proposal</button>
+      <button class="approve-btn secondary">Request Changes</button>
+    </div>
+    <div class="approved-state" id="approved-state">
+      <div class="mark">✓</div>
+      <h4 class="serif">Approved</h4>
+      <p>24 APR · 11:19 · IP 49.37.x.x</p>
+    </div>
+  </div></div>
+</section>
+
+</main>
+
+<!-- === BOTTOM BAR === -->
+<footer class="bottombar">
+  <button class="nav-btn" id="prev-btn" onclick="go(current-1)">← Previous</button>
+  <div class="nav-progress">Step <b id="prog-n">01</b> of 05 · <span id="prog-label">Overview</span></div>
+  <button class="nav-btn primary" id="next-btn" onclick="go(current+1)">Next →</button>
+</footer>
+
+<script>
+/* ==================================================
+   NAVIGATION
+   ================================================== */
+let current = 1;
+const totalSteps = 5;
+const stepNames = ['','Overview','Site Survey','3D Preview','Report','Approval'];
+
+function go(step){
+  if(step<1||step>totalSteps) return;
+  current = step;
+  document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',+s.dataset.screen===step));
+  document.querySelectorAll('.stepdot').forEach((d,i)=>{
+    const n=i+1;
+    d.classList.toggle('active',n===step);
+    d.classList.toggle('done',n<step);
+  });
+  document.getElementById('prog-n').textContent = String(step).padStart(2,'0');
+  document.getElementById('prog-label').textContent = stepNames[step];
+  document.getElementById('prev-btn').disabled = step===1;
+  document.getElementById('next-btn').disabled = step===totalSteps;
+  document.getElementById('next-btn').textContent = step===totalSteps ? 'Restart ↻' : 'Next →';
+  if(step===totalSteps){
+    document.getElementById('next-btn').onclick = ()=>{resetApproval();go(1);};
+  } else {
+    document.getElementById('next-btn').onclick = ()=>go(current+1);
+  }
+  // Kick 3D if not inited
+  if(step===3 && !threeInited) initThree();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+document.querySelectorAll('.stepdot').forEach(d=>d.onclick=()=>go(+d.dataset.step));
+document.querySelectorAll('.role-card').forEach(c=>c.onclick=()=>go(+c.dataset.jump));
+
+/* ==================================================
+   THREE.JS — Parametric lift schematic
+   ================================================== */
+let threeInited = false;
+let scene, camera, renderer, shaft, cabin, floorLines=[], wallGroup;
+let params = {floors:6, width:1800, depth:2000, pos:0, finish:'brushed'};
+const finishColors = {
+  brushed: 0xB5AD9F,
+  mirror:  0xA0A8B4,
+  onyx:    0x2A2C32,
+};
+const floorLabels = ['Ground','First','Second','Third','Fourth','Fifth','Sixth','Seventh','Eighth','Ninth','Tenth','11th','12th','13th','14th'];
+
+function initThree(){
+  threeInited = true;
+  const canvas = document.getElementById('three-canvas');
+  const container = canvas.parentElement;
+  const w = container.clientWidth, h = container.clientHeight;
+
+  scene = new THREE.Scene();
+  scene.background = null;
+  scene.fog = new THREE.Fog(0x14161A, 12, 40);
+
+  camera = new THREE.PerspectiveCamera(38, w/h, 0.1, 100);
+  camera.position.set(9, 6, 11);
+  camera.lookAt(0,3,0);
+
+  renderer = new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  renderer.setSize(w,h,false);
+
+  // Lights
+  scene.add(new THREE.AmbientLight(0xffffff, 0.28));
+  const key = new THREE.DirectionalLight(0xFFD9B0, 0.85);
+  key.position.set(8,10,6); scene.add(key);
+  const rim = new THREE.DirectionalLight(0x9AA8C0, 0.45);
+  rim.position.set(-8,4,-6); scene.add(rim);
+  const fill = new THREE.PointLight(0xD4A574, 0.6, 20);
+  fill.position.set(0,5,5); scene.add(fill);
+
+  // Ground ring
+  const ringGeo = new THREE.RingGeometry(4, 4.02, 64);
+  const ringMat = new THREE.MeshBasicMaterial({color:0xD4A574, transparent:true, opacity:0.3, side:THREE.DoubleSide});
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = -Math.PI/2;
+  ring.position.y = -0.01;
+  scene.add(ring);
+
+  // ground grid
+  const gridHelper = new THREE.GridHelper(14, 14, 0x3B404A, 0x262A31);
+  gridHelper.position.y = 0;
+  scene.add(gridHelper);
+
+  shaft = new THREE.Group();
+  scene.add(shaft);
+
+  buildShaft();
+  animate();
+
+  // Orbit controls (manual, lightweight)
+  let dragging=false, lastX=0, lastY=0, azim=0, incl=0.45;
+  canvas.addEventListener('mousedown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY});
+  window.addEventListener('mouseup',()=>dragging=false);
+  window.addEventListener('mousemove',e=>{
+    if(!dragging) return;
+    const dx=e.clientX-lastX, dy=e.clientY-lastY;
+    lastX=e.clientX; lastY=e.clientY;
+    azim -= dx*0.006;
+    incl = Math.max(0.05, Math.min(1.1, incl - dy*0.005));
+    updateCamera(azim,incl);
+  });
+  canvas.addEventListener('touchstart',e=>{dragging=true;lastX=e.touches[0].clientX;lastY=e.touches[0].clientY},{passive:true});
+  window.addEventListener('touchend',()=>dragging=false);
+  window.addEventListener('touchmove',e=>{
+    if(!dragging) return;
+    const dx=e.touches[0].clientX-lastX, dy=e.touches[0].clientY-lastY;
+    lastX=e.touches[0].clientX; lastY=e.touches[0].clientY;
+    azim -= dx*0.006;
+    incl = Math.max(0.05, Math.min(1.1, incl - dy*0.005));
+    updateCamera(azim,incl);
+  },{passive:true});
+
+  function updateCamera(az,inc){
+    const r = 14;
+    camera.position.x = Math.sin(az) * Math.cos(inc) * r;
+    camera.position.z = Math.cos(az) * Math.cos(inc) * r;
+    camera.position.y = 3 + Math.sin(inc) * r * 0.6;
+    camera.lookAt(0, (params.floors*1.1)/2, 0);
+  }
+  updateCamera(0.6, 0.32);
+
+  // Auto slow spin when idle
+  let idleTime = 0;
+  function idleSpin(){
+    if(!dragging){
+      idleTime += 0.003;
+      azim = 0.6 + Math.sin(idleTime)*0.12;
+      updateCamera(azim, incl);
+    }
+    requestAnimationFrame(idleSpin);
+  }
+  idleSpin();
+
+  // Resize
+  new ResizeObserver(()=>{
+    const w = container.clientWidth, h = container.clientHeight;
+    if(w>0 && h>0){
+      renderer.setSize(w,h,false);
+      camera.aspect = w/h;
+      camera.updateProjectionMatrix();
+    }
+  }).observe(container);
+}
+
+function clearGroup(g){
+  while(g.children.length){
+    const c = g.children[0];
+    g.remove(c);
+    if(c.geometry) c.geometry.dispose();
+    if(c.material){
+      if(Array.isArray(c.material)) c.material.forEach(m=>m.dispose());
+      else c.material.dispose();
+    }
+  }
+}
+
+function buildShaft(){
+  clearGroup(shaft);
+
+  const W = params.width/600;   // x
+  const D = params.depth/600;   // z
+  const floorH = 1.1;
+  const H = params.floors * floorH;
+
+  // Wireframe shaft walls (lines)
+  const wallPts = [
+    [-W/2,0,-D/2],[W/2,0,-D/2],[W/2,0,D/2],[-W/2,0,D/2],[-W/2,0,-D/2],
+    [-W/2,H,-D/2],[W/2,H,-D/2],[W/2,H,D/2],[-W/2,H,D/2],[-W/2,H,-D/2]
+  ];
+  const verticals = [
+    [[W/2,0,-D/2],[W/2,H,-D/2]],
+    [[W/2,0,D/2],[W/2,H,D/2]],
+    [[-W/2,0,D/2],[-W/2,H,D/2]]
+  ];
+  const wallMat = new THREE.LineBasicMaterial({color:0xD4A574, transparent:true, opacity:0.55});
+  const outline = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-W/2,0,-D/2),new THREE.Vector3(W/2,0,-D/2),
+    new THREE.Vector3(W/2,0,D/2),new THREE.Vector3(-W/2,0,D/2),
+    new THREE.Vector3(-W/2,0,-D/2)
+  ]);
+  shaft.add(new THREE.Line(outline, wallMat));
+  const top = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-W/2,H,-D/2),new THREE.Vector3(W/2,H,-D/2),
+    new THREE.Vector3(W/2,H,D/2),new THREE.Vector3(-W/2,H,D/2),
+    new THREE.Vector3(-W/2,H,-D/2)
+  ]);
+  shaft.add(new THREE.Line(top, wallMat));
+  verticals.forEach(v=>{
+    const g = new THREE.BufferGeometry().setFromPoints(v.map(p=>new THREE.Vector3(...p)));
+    shaft.add(new THREE.Line(g, wallMat));
+  });
+
+  // Floor slabs (lines)
+  const slabMat = new THREE.LineBasicMaterial({color:0xE8E4DC, transparent:true, opacity:0.25});
+  for(let i=0;i<=params.floors;i++){
+    const y = i*floorH;
+    const slab = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-W/2,y,-D/2),new THREE.Vector3(W/2,y,-D/2),
+      new THREE.Vector3(W/2,y,D/2),new THREE.Vector3(-W/2,y,D/2),
+      new THREE.Vector3(-W/2,y,-D/2)
+    ]);
+    shaft.add(new THREE.Line(slab, slabMat));
+
+    // tick marks (label markers)
+    if(i<params.floors){
+      const tickY = y + floorH*0.5;
+      const tickMat = new THREE.LineBasicMaterial({color:0xD4A574, transparent:true, opacity:0.7});
+      const tick = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(W/2+0.05, tickY, -D/2),
+        new THREE.Vector3(W/2+0.25, tickY, -D/2)
+      ]);
+      shaft.add(new THREE.Line(tick, tickMat));
+    }
+  }
+
+  // Rails (guide rails)
+  const railMat = new THREE.MeshStandardMaterial({color:0x6B6862, metalness:.6, roughness:.3});
+  const railGeo = new THREE.BoxGeometry(0.08, H, 0.08);
+  const rail1 = new THREE.Mesh(railGeo, railMat);
+  rail1.position.set(-W/2+0.15, H/2, 0);
+  shaft.add(rail1);
+  const rail2 = rail1.clone();
+  rail2.position.set(W/2-0.15, H/2, 0);
+  shaft.add(rail2);
+
+  // Cabin
+  const cabW = W*0.65, cabD = D*0.65, cabH = floorH*0.82;
+  const cabGeo = new THREE.BoxGeometry(cabW, cabH, cabD);
+  const cabMat = new THREE.MeshStandardMaterial({
+    color: finishColors[params.finish],
+    metalness: params.finish==='mirror'?.9:(params.finish==='brushed'?.6:.2),
+    roughness: params.finish==='mirror'?.1:(params.finish==='brushed'?.35:.6),
+  });
+  cabin = new THREE.Mesh(cabGeo, cabMat);
+
+  // Cabin edge wireframe
+  const edges = new THREE.EdgesGeometry(cabGeo);
+  const edgeLines = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({color:0xEAC197, transparent:true, opacity:.8}));
+  cabin.add(edgeLines);
+
+  // Inside door line
+  const doorGeo = new THREE.PlaneGeometry(cabW*0.55, cabH*0.85);
+  const doorMat = new THREE.MeshBasicMaterial({color:0x1F1C16, transparent:true, opacity:0.4, side:THREE.DoubleSide});
+  const door = new THREE.Mesh(doorGeo, doorMat);
+  door.position.z = cabD/2 + 0.005;
+  cabin.add(door);
+
+  updateCabinPos();
+  shaft.add(cabin);
+
+  // Recenter shaft so bottom is at 0 and center at origin
+  shaft.position.y = 0;
+
+  // Update readouts
+  updateReadouts();
+}
+
+function updateCabinPos(){
+  if(!cabin) return;
+  const floorH = 1.1;
+  const maxY = (params.floors-1) * floorH;
+  const t = params.pos/100;
+  cabin.position.y = (floorH*0.5) + t*maxY;
+  // label readout
+  const idx = Math.round(t * (params.floors-1));
+  document.getElementById('val-pos').textContent = floorLabels[idx] || ('Floor '+idx);
+}
+
+function updateReadouts(){
+  document.getElementById('val-floors').textContent = params.floors;
+  document.getElementById('val-width').textContent = params.width+' mm';
+  document.getElementById('val-depth').textContent = params.depth+' mm';
+  document.getElementById('val-finish').textContent = params.finish.charAt(0).toUpperCase()+params.finish.slice(1);
+
+  const travel = ((params.floors-1) * 3.04).toFixed(1);
+  const area = ((params.width/1000)*(params.depth/1000)).toFixed(2);
+  document.getElementById('val-travel').innerHTML = travel+'<span class="u">m</span>';
+  document.getElementById('val-area').innerHTML = area+'<span class="u">m²</span>';
+
+  // Quote estimate (demo)
+  const base = 9 + params.floors*0.95 + (params.width-1200)/1200*2 + (params.depth-1400)/1200*2;
+  const finishMult = params.finish==='mirror'?1.12:(params.finish==='onyx'?1.18:1);
+  const quote = (base*finishMult).toFixed(1);
+  document.getElementById('val-quote').innerHTML = '₹'+quote+'<span class="u">L</span>';
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  if(renderer && scene && camera) renderer.render(scene, camera);
+}
+
+/* ==================================================
+   CONTROL WIRING
+   ================================================== */
+document.getElementById('ctrl-floors').addEventListener('input',e=>{
+  params.floors = +e.target.value;
+  buildShaft();
+});
+document.getElementById('ctrl-width').addEventListener('input',e=>{
+  params.width = +e.target.value;
+  buildShaft();
+});
+document.getElementById('ctrl-depth').addEventListener('input',e=>{
+  params.depth = +e.target.value;
+  buildShaft();
+});
+document.getElementById('ctrl-pos').addEventListener('input',e=>{
+  params.pos = +e.target.value;
+  updateCabinPos();
+});
+document.querySelectorAll('.finish-opt').forEach(o=>{
+  o.addEventListener('click',()=>{
+    document.querySelectorAll('.finish-opt').forEach(x=>x.classList.remove('active'));
+    o.classList.add('active');
+    params.finish = o.dataset.finish;
+    buildShaft();
+  });
+});
+
+/* ==================================================
+   APPROVAL
+   ================================================== */
+function approveNow(){
+  document.getElementById('owner-actions').style.display='none';
+  document.getElementById('approved-state').classList.add('show');
+  const active = document.querySelector('.flow-step.active');
+  if(active){
+    active.classList.remove('active');
+    active.classList.add('done');
+    active.querySelector('.meta').textContent='APPROVED · 24 APR 11:19';
+  }
+  document.getElementById('flow-step-4').classList.add('active');
+  document.getElementById('flow-step-4').querySelector('.meta').textContent='DISPATCHED';
+}
+function resetApproval(){
+  document.getElementById('owner-actions').style.display='grid';
+  document.getElementById('approved-state').classList.remove('show');
+  document.querySelectorAll('.flow-step').forEach((s,i)=>{
+    s.classList.remove('active');
+    if(i<2) s.classList.add('done');
+    else s.classList.remove('done');
+  });
+  document.querySelectorAll('.flow-step')[2].classList.add('active');
+  document.getElementById('flow-3-meta').textContent='IN PROGRESS';
+  document.getElementById('flow-step-4').querySelector('.meta').textContent='QUEUED';
+}
+
+/* ==================================================
+   SURVEY FLOOR ADD / REMOVE
+   ================================================== */
+document.querySelector('.add-floor').addEventListener('click',e=>{
+  e.preventDefault();
+  const stack = document.getElementById('floor-stack');
+  const count = stack.children.length;
+  const row = document.createElement('div');
+  row.className='floor-row';
+  row.innerHTML = `<span class="label">${String(count).padStart(2,'0')}</span><input value="Floor ${count}"><span class="ht mono">3000mm</span><span class="x">×</span>`;
+  stack.appendChild(row);
+  row.querySelector('.x').addEventListener('click',()=>row.remove());
+});
+document.querySelectorAll('.floor-row .x').forEach(x=>x.addEventListener('click',e=>e.target.closest('.floor-row').remove()));
+
+/* Keyboard nav */
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='SELECT'||e.target.tagName==='TEXTAREA') return;
+  if(e.key==='ArrowRight') go(current+1);
+  if(e.key==='ArrowLeft') go(current-1);
+});
+</script>
+</body>
+</html>
