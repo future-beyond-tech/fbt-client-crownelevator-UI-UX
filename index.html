@@ -1164,8 +1164,8 @@
     </div>
 
     <div class="app-section" style="border-bottom:none">
-      <button class="prim-btn" onclick="window.__generateFlash=true;go(3)">Generate 3D Preview →</button>
-      <button class="prim-btn ghost" style="margin-top:10px">Save as Draft</button>
+      <button type="button" class="prim-btn" id="gen-3d-btn">Generate 3D Preview →</button>
+      <button type="button" class="prim-btn ghost" style="margin-top:10px">Save as Draft</button>
     </div>
   </div></div>
 
@@ -1530,6 +1530,16 @@ function go(step){
 }
 document.querySelectorAll('.stepdot').forEach(d=>d.onclick=()=>go(+d.dataset.step));
 document.querySelectorAll('.role-card').forEach(c=>c.onclick=()=>go(+c.dataset.jump));
+
+// "Generate 3D Preview" CTA on Stage 02 → jump to Stage 03 with the loader flash
+const genBtn = document.getElementById('gen-3d-btn');
+if(genBtn){
+  genBtn.addEventListener('click', (e)=>{
+    e.preventDefault();
+    window.__generateFlash = true;
+    go(3);
+  });
+}
 
 /* ==================================================
    THREE.JS — Parametric lift · realistic preview
