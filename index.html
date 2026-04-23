@@ -473,6 +473,28 @@
   .swatch.mirror{background:linear-gradient(135deg,#3A3D43,#72757D,#3A3D43)}
   .swatch.onyx{background:linear-gradient(135deg,#15161A,#26282E,#15161A)}
 
+  .sim-btn{
+    width:100%;display:flex;align-items:center;justify-content:center;gap:10px;
+    padding:12px 14px;margin-top:6px;
+    background:linear-gradient(180deg,rgba(212,165,116,.14),rgba(212,165,116,.04));
+    border:1px solid var(--brass-deep);border-radius:4px;color:var(--brass-bright);
+    font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:700;
+    letter-spacing:.18em;text-transform:uppercase;cursor:pointer;
+    transition:all .2s ease;
+  }
+  .sim-btn:hover{background:linear-gradient(180deg,rgba(212,165,116,.24),rgba(212,165,116,.08));border-color:var(--brass);color:var(--brass-bright);transform:translateY(-1px)}
+  .sim-btn:disabled{opacity:.6;cursor:wait;transform:none}
+  .sim-btn.running{color:var(--sage);border-color:var(--sage)}
+  .sim-btn .sim-dot{
+    width:7px;height:7px;border-radius:50%;background:var(--brass);
+    box-shadow:0 0 10px var(--brass);
+  }
+  .sim-btn.running .sim-dot{background:var(--sage);box-shadow:0 0 10px var(--sage);animation:pulse 1.2s ease-in-out infinite}
+  .sim-hint{
+    margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:9px;
+    letter-spacing:.08em;color:var(--ink-faint);line-height:1.55;
+  }
+
   .spec-readout{
     margin-top:20px;padding-top:20px;border-top:1px solid var(--border);
     display:grid;grid-template-columns:1fr 1fr;gap:12px;
@@ -961,6 +983,14 @@
         <input type="range" class="slider" min="0" max="100" value="0" id="ctrl-pos">
       </div>
 
+      <div class="control-group">
+        <button id="sim-btn" class="sim-btn" type="button">
+          <span class="sim-dot"></span>
+          <span class="sim-lbl">Simulate lift cycle</span>
+        </button>
+        <div class="sim-hint">Cabin travels floor-to-floor · doors open front on G/2+, side on 1F.</div>
+      </div>
+
       <div class="control-group" style="margin-bottom:0">
         <div class="top" style="margin-bottom:8px"><span class="label">Cabin finish</span><span class="val" id="val-finish">Brushed</span></div>
         <div class="finish-opts">
@@ -1218,17 +1248,29 @@ document.querySelectorAll('.stepdot').forEach(d=>d.onclick=()=>go(+d.dataset.ste
 document.querySelectorAll('.role-card').forEach(c=>c.onclick=()=>go(+c.dataset.jump));
 
 /* ==================================================
-   THREE.JS — Parametric lift schematic
+   THREE.JS — Parametric lift · realistic preview
    ================================================== */
 let threeInited = false;
-let scene, camera, renderer, shaft, cabin, floorLines=[], wallGroup;
+let scene, camera, renderer, shaft, cabin;
+let cabinDoorsF = null, cabinDoorsS = null;
+let landingDoors = [];
 let params = {floors:6, width:1800, depth:2000, pos:0, finish:'brushed'};
-const finishColors = {
-  brushed: 0xB5AD9F,
-  mirror:  0xA0A8B4,
-  onyx:    0x2A2C32,
+let simState = {running:false, abort:false};
+const FLOOR_H = 1.1;
+
+const finishSpec = {
+  brushed: {color:0xC6BDAD, metalness:0.72, roughness:0.30},
+  mirror:  {color:0xC9CED7, metalness:0.96, roughness:0.06},
+  onyx:    {color:0x25272C, metalness:0.45, roughness:0.55},
 };
 const floorLabels = ['Ground','First','Second','Third','Fourth','Fifth','Sixth','Seventh','Eighth','Ninth','Tenth','11th','12th','13th','14th'];
+
+// Per-floor door opening side (front = +Z, side = +X)
+function doorSideFor(i){
+  if(i === 0) return 'front';
+  if(i === 1) return 'side';
+  return 'front';
+}
 
 function initThree(){
   threeInited = true;
@@ -1238,36 +1280,67 @@ function initThree(){
 
   scene = new THREE.Scene();
   scene.background = null;
-  scene.fog = new THREE.Fog(0x14161A, 12, 40);
+  scene.fog = new THREE.Fog(0x0E1014, 16, 46);
 
-  camera = new THREE.PerspectiveCamera(38, w/h, 0.1, 100);
+  camera = new THREE.PerspectiveCamera(35, w/h, 0.1, 100);
   camera.position.set(9, 6, 11);
   camera.lookAt(0,3,0);
 
   renderer = new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
   renderer.setSize(w,h,false);
+  if(THREE.sRGBEncoding) renderer.outputEncoding = THREE.sRGBEncoding;
+  if(THREE.ACESFilmicToneMapping){
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+  }
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-  // Lights
-  scene.add(new THREE.AmbientLight(0xffffff, 0.28));
-  const key = new THREE.DirectionalLight(0xFFD9B0, 0.85);
-  key.position.set(8,10,6); scene.add(key);
-  const rim = new THREE.DirectionalLight(0x9AA8C0, 0.45);
-  rim.position.set(-8,4,-6); scene.add(rim);
-  const fill = new THREE.PointLight(0xD4A574, 0.6, 20);
-  fill.position.set(0,5,5); scene.add(fill);
+  // Lights — layered for realism
+  scene.add(new THREE.HemisphereLight(0xFFE8CC, 0x1A1410, 0.45));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.12));
 
-  // Ground ring
-  const ringGeo = new THREE.RingGeometry(4, 4.02, 64);
-  const ringMat = new THREE.MeshBasicMaterial({color:0xD4A574, transparent:true, opacity:0.3, side:THREE.DoubleSide});
-  const ring = new THREE.Mesh(ringGeo, ringMat);
+  const key = new THREE.DirectionalLight(0xFFE1B8, 0.95);
+  key.position.set(9, 14, 8);
+  key.castShadow = true;
+  key.shadow.mapSize.set(1024,1024);
+  key.shadow.camera.left = -8; key.shadow.camera.right = 8;
+  key.shadow.camera.top = 16; key.shadow.camera.bottom = -2;
+  key.shadow.camera.near = 0.1; key.shadow.camera.far = 40;
+  key.shadow.bias = -0.0005;
+  scene.add(key);
+
+  const rim = new THREE.DirectionalLight(0x9AB5D6, 0.55);
+  rim.position.set(-10, 6, -8);
+  scene.add(rim);
+
+  const accent = new THREE.PointLight(0xD4A574, 0.75, 22, 2);
+  accent.position.set(0, 4, 6);
+  scene.add(accent);
+
+  // Ground — dark disc with subtle brass ring
+  const ground = new THREE.Mesh(
+    new THREE.CircleGeometry(5.8, 96),
+    new THREE.MeshStandardMaterial({color:0x121418, metalness:0.12, roughness:0.88})
+  );
+  ground.rotation.x = -Math.PI/2;
+  ground.position.y = -0.012;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(4.15, 4.22, 96),
+    new THREE.MeshBasicMaterial({color:0xD4A574, transparent:true, opacity:0.5, side:THREE.DoubleSide})
+  );
   ring.rotation.x = -Math.PI/2;
-  ring.position.y = -0.01;
+  ring.position.y = -0.006;
   scene.add(ring);
 
-  // ground grid
-  const gridHelper = new THREE.GridHelper(14, 14, 0x3B404A, 0x262A31);
-  gridHelper.position.y = 0;
+  const gridHelper = new THREE.GridHelper(14, 14, 0x3B404A, 0x20242A);
+  gridHelper.position.y = -0.004;
+  gridHelper.material.transparent = true;
+  gridHelper.material.opacity = 0.45;
   scene.add(gridHelper);
 
   shaft = new THREE.Group();
@@ -1277,7 +1350,7 @@ function initThree(){
   animate();
 
   // Orbit controls (manual, lightweight)
-  let dragging=false, lastX=0, lastY=0, azim=0, incl=0.45;
+  let dragging=false, lastX=0, lastY=0, azim=0.6, incl=0.32;
   canvas.addEventListener('mousedown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY});
   window.addEventListener('mouseup',()=>dragging=false);
   window.addEventListener('mousemove',e=>{
@@ -1304,15 +1377,15 @@ function initThree(){
     camera.position.x = Math.sin(az) * Math.cos(inc) * r;
     camera.position.z = Math.cos(az) * Math.cos(inc) * r;
     camera.position.y = 3 + Math.sin(inc) * r * 0.6;
-    camera.lookAt(0, (params.floors*1.1)/2, 0);
+    camera.lookAt(0, (params.floors*FLOOR_H)/2, 0);
   }
-  updateCamera(0.6, 0.32);
+  updateCamera(azim, incl);
 
-  // Auto slow spin when idle
+  // Auto slow spin when idle (and not simulating)
   let idleTime = 0;
   function idleSpin(){
-    if(!dragging){
-      idleTime += 0.003;
+    if(!dragging && !simState.running){
+      idleTime += 0.0025;
       azim = 0.6 + Math.sin(idleTime)*0.12;
       updateCamera(azim, incl);
     }
@@ -1340,60 +1413,75 @@ function clearGroup(g){
       if(Array.isArray(c.material)) c.material.forEach(m=>m.dispose());
       else c.material.dispose();
     }
+    if(c.children && c.children.length) clearGroup(c);
   }
 }
 
 function buildShaft(){
+  simState.abort = true; // cancel any in-flight sim
   clearGroup(shaft);
+  landingDoors = [];
+  cabinDoorsF = cabinDoorsS = null;
 
-  const W = params.width/600;   // x
-  const D = params.depth/600;   // z
-  const floorH = 1.1;
-  const H = params.floors * floorH;
+  const W = params.width/600;
+  const D = params.depth/600;
+  const H = params.floors * FLOOR_H;
 
-  // Wireframe shaft walls (lines)
-  const wallPts = [
-    [-W/2,0,-D/2],[W/2,0,-D/2],[W/2,0,D/2],[-W/2,0,D/2],[-W/2,0,-D/2],
-    [-W/2,H,-D/2],[W/2,H,-D/2],[W/2,H,D/2],[-W/2,H,D/2],[-W/2,H,-D/2]
-  ];
-  const verticals = [
-    [[W/2,0,-D/2],[W/2,H,-D/2]],
-    [[W/2,0,D/2],[W/2,H,D/2]],
-    [[-W/2,0,D/2],[-W/2,H,D/2]]
-  ];
-  const wallMat = new THREE.LineBasicMaterial({color:0xD4A574, transparent:true, opacity:0.55});
-  const outline = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(-W/2,0,-D/2),new THREE.Vector3(W/2,0,-D/2),
-    new THREE.Vector3(W/2,0,D/2),new THREE.Vector3(-W/2,0,D/2),
-    new THREE.Vector3(-W/2,0,-D/2)
-  ]);
-  shaft.add(new THREE.Line(outline, wallMat));
-  const top = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(-W/2,H,-D/2),new THREE.Vector3(W/2,H,-D/2),
-    new THREE.Vector3(W/2,H,D/2),new THREE.Vector3(-W/2,H,D/2),
-    new THREE.Vector3(-W/2,H,-D/2)
-  ]);
-  shaft.add(new THREE.Line(top, wallMat));
-  verticals.forEach(v=>{
-    const g = new THREE.BufferGeometry().setFromPoints(v.map(p=>new THREE.Vector3(...p)));
-    shaft.add(new THREE.Line(g, wallMat));
+  // --- Shaft structural walls (back & left, solid + receive shadows) ---
+  const wallMat = new THREE.MeshStandardMaterial({
+    color:0x1A1D23, metalness:0.28, roughness:0.82, side:THREE.DoubleSide
   });
+  const backWall = new THREE.Mesh(new THREE.PlaneGeometry(W*0.998, H*0.998), wallMat);
+  backWall.position.set(0, H/2, -D/2 + 0.002);
+  backWall.receiveShadow = true;
+  shaft.add(backWall);
 
-  // Floor slabs (lines)
-  const slabMat = new THREE.LineBasicMaterial({color:0xE8E4DC, transparent:true, opacity:0.25});
+  const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(D*0.998, H*0.998), wallMat);
+  leftWall.rotation.y = Math.PI/2;
+  leftWall.position.set(-W/2 + 0.002, H/2, 0);
+  leftWall.receiveShadow = true;
+  shaft.add(leftWall);
+
+  // --- Shaft pit (bottom slab) and roof (top slab) ---
+  const pit = new THREE.Mesh(
+    new THREE.PlaneGeometry(W, D),
+    new THREE.MeshStandardMaterial({color:0x0F1115, metalness:0.18, roughness:0.9})
+  );
+  pit.rotation.x = -Math.PI/2;
+  pit.position.y = 0.003;
+  pit.receiveShadow = true;
+  shaft.add(pit);
+
+  const roof = pit.clone();
+  roof.position.y = H - 0.003;
+  roof.rotation.x = Math.PI/2;
+  shaft.add(roof);
+
+  // --- Brass edge outline (still keeps the schematic vibe) ---
+  const edgeMat = new THREE.LineBasicMaterial({color:0xD4A574, transparent:true, opacity:0.45});
+  const makeLine = (pts)=> new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(pts.map(p=>new THREE.Vector3(...p))),
+    edgeMat
+  );
+  [[-W/2,-D/2],[W/2,-D/2],[W/2,D/2],[-W/2,D/2]].forEach(([x,z])=>{
+    shaft.add(makeLine([[x,0,z],[x,H,z]]));
+  });
+  shaft.add(makeLine([[-W/2,0,-D/2],[W/2,0,-D/2],[W/2,0,D/2],[-W/2,0,D/2],[-W/2,0,-D/2]]));
+  shaft.add(makeLine([[-W/2,H,-D/2],[W/2,H,-D/2],[W/2,H,D/2],[-W/2,H,D/2],[-W/2,H,-D/2]]));
+
+  // --- Per-floor slab rings & tick markers ---
+  const slabMat = new THREE.LineBasicMaterial({color:0xE8E4DC, transparent:true, opacity:0.22});
+  const tickMat = new THREE.LineBasicMaterial({color:0xD4A574, transparent:true, opacity:0.75});
   for(let i=0;i<=params.floors;i++){
-    const y = i*floorH;
+    const y = i*FLOOR_H;
     const slab = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(-W/2,y,-D/2),new THREE.Vector3(W/2,y,-D/2),
       new THREE.Vector3(W/2,y,D/2),new THREE.Vector3(-W/2,y,D/2),
       new THREE.Vector3(-W/2,y,-D/2)
     ]);
     shaft.add(new THREE.Line(slab, slabMat));
-
-    // tick marks (label markers)
     if(i<params.floors){
-      const tickY = y + floorH*0.5;
-      const tickMat = new THREE.LineBasicMaterial({color:0xD4A574, transparent:true, opacity:0.7});
+      const tickY = y + FLOOR_H*0.5;
       const tick = new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(W/2+0.05, tickY, -D/2),
         new THREE.Vector3(W/2+0.25, tickY, -D/2)
@@ -1402,57 +1490,351 @@ function buildShaft(){
     }
   }
 
-  // Rails (guide rails)
-  const railMat = new THREE.MeshStandardMaterial({color:0x6B6862, metalness:.6, roughness:.3});
+  // --- Guide rails (left & right of shaft) ---
+  const railMat = new THREE.MeshStandardMaterial({color:0x5B5E66, metalness:0.85, roughness:0.22});
   const railGeo = new THREE.BoxGeometry(0.08, H, 0.08);
   const rail1 = new THREE.Mesh(railGeo, railMat);
-  rail1.position.set(-W/2+0.15, H/2, 0);
+  rail1.position.set(-W/2+0.2, H/2, 0);
+  rail1.castShadow = true;
   shaft.add(rail1);
   const rail2 = rail1.clone();
-  rail2.position.set(W/2-0.15, H/2, 0);
+  rail2.position.set(W/2-0.2, H/2, 0);
   shaft.add(rail2);
 
-  // Cabin
-  const cabW = W*0.65, cabD = D*0.65, cabH = floorH*0.82;
-  const cabGeo = new THREE.BoxGeometry(cabW, cabH, cabD);
-  const cabMat = new THREE.MeshStandardMaterial({
-    color: finishColors[params.finish],
-    metalness: params.finish==='mirror'?.9:(params.finish==='brushed'?.6:.2),
-    roughness: params.finish==='mirror'?.1:(params.finish==='brushed'?.35:.6),
-  });
-  cabin = new THREE.Mesh(cabGeo, cabMat);
+  // --- Counterweight on back-left rail ---
+  const cw = new THREE.Mesh(
+    new THREE.BoxGeometry(0.24, 0.72, 0.24),
+    new THREE.MeshStandardMaterial({color:0x3A3D44, metalness:0.6, roughness:0.45})
+  );
+  cw.position.set(-W/2+0.38, H*0.55, -D/2+0.26);
+  cw.castShadow = true;
+  shaft.add(cw);
 
-  // Cabin edge wireframe
-  const edges = new THREE.EdgesGeometry(cabGeo);
-  const edgeLines = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({color:0xEAC197, transparent:true, opacity:.8}));
-  cabin.add(edgeLines);
+  // --- Motor room slab on top ---
+  const motor = new THREE.Mesh(
+    new THREE.BoxGeometry(W*0.86, 0.18, D*0.86),
+    new THREE.MeshStandardMaterial({color:0x22262C, metalness:0.55, roughness:0.42})
+  );
+  motor.position.set(0, H+0.12, 0);
+  motor.castShadow = true;
+  motor.receiveShadow = true;
+  shaft.add(motor);
+  // Hoist cable from motor to cabin top
+  const cable = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.012, 0.012, H, 6),
+    new THREE.MeshStandardMaterial({color:0x201F1C, metalness:0.8, roughness:0.4})
+  );
+  cable.position.set(0, H/2 + 0.05, 0);
+  shaft.add(cable);
 
-  // Inside door line
-  const doorGeo = new THREE.PlaneGeometry(cabW*0.55, cabH*0.85);
-  const doorMat = new THREE.MeshBasicMaterial({color:0x1F1C16, transparent:true, opacity:0.4, side:THREE.DoubleSide});
-  const door = new THREE.Mesh(doorGeo, doorMat);
-  door.position.z = cabD/2 + 0.005;
-  cabin.add(door);
+  // --- Landing doors per floor ---
+  for(let i=0;i<params.floors;i++){
+    const side = doorSideFor(i);
+    const doors = buildLandingDoors(W, D, side);
+    doors.position.y = i * FLOOR_H;
+    doors.userData.side = side;
+    doors.userData.floor = i;
+    shaft.add(doors);
+    landingDoors.push(doors);
 
+    // Floor number plate next to the door
+    const plate = makeFloorPlate(i, W, D, side);
+    plate.position.y = i * FLOOR_H;
+    shaft.add(plate);
+  }
+
+  // --- Cabin ---
+  cabin = buildCabin(W, D);
   updateCabinPos();
   shaft.add(cabin);
 
-  // Recenter shaft so bottom is at 0 and center at origin
-  shaft.position.y = 0;
-
-  // Update readouts
   updateReadouts();
+}
+
+// Landing doors = two sliding panels + frame, placed on the correct shaft wall.
+function buildLandingDoors(W, D, side){
+  const group = new THREE.Group();
+  const doorH = FLOOR_H * 0.82;
+  const openW = (side==='front' ? W : D) * 0.56;
+  const panelW = openW/2;
+  const panelT = 0.035;
+  const frameT = 0.05;
+
+  const panelMat = new THREE.MeshStandardMaterial({
+    color:0xB8A78C, metalness:0.78, roughness:0.24,
+  });
+  const frameMat = new THREE.MeshStandardMaterial({
+    color:0x1C1E23, metalness:0.6, roughness:0.45,
+  });
+  const sillMat = new THREE.MeshStandardMaterial({
+    color:0x8B8377, metalness:0.85, roughness:0.32,
+  });
+
+  // inner group is authored flat on +Z wall; rotated to +X wall when side
+  const inner = new THREE.Group();
+
+  // Frame
+  const frameTop = new THREE.Mesh(
+    new THREE.BoxGeometry(openW + frameT*2, frameT, 0.08), frameMat
+  );
+  frameTop.position.y = doorH + frameT/2;
+  inner.add(frameTop);
+  const frameLeft = new THREE.Mesh(
+    new THREE.BoxGeometry(frameT, doorH + frameT*2, 0.08), frameMat
+  );
+  frameLeft.position.set(-openW/2 - frameT/2, doorH/2 + frameT/2 - frameT/2, 0);
+  frameLeft.position.y = doorH/2;
+  inner.add(frameLeft);
+  const frameRight = frameLeft.clone();
+  frameRight.position.x = openW/2 + frameT/2;
+  inner.add(frameRight);
+
+  // Sill
+  const sill = new THREE.Mesh(
+    new THREE.BoxGeometry(openW + frameT*2, 0.018, 0.08), sillMat
+  );
+  sill.position.y = 0.009;
+  inner.add(sill);
+
+  // Two panels
+  const leftPanel = new THREE.Mesh(new THREE.BoxGeometry(panelW, doorH, panelT), panelMat);
+  const rightPanel = leftPanel.clone();
+  leftPanel.castShadow = rightPanel.castShadow = true;
+  leftPanel.receiveShadow = rightPanel.receiveShadow = true;
+  leftPanel.position.set(-panelW/2, doorH/2, 0);
+  rightPanel.position.set(panelW/2, doorH/2, 0);
+  inner.add(leftPanel);
+  inner.add(rightPanel);
+
+  // subtle brass seam between panels
+  const seamMat = new THREE.MeshBasicMaterial({color:0x0a0a0a});
+  const seam = new THREE.Mesh(new THREE.BoxGeometry(0.005, doorH*0.96, panelT+0.002), seamMat);
+  seam.position.y = doorH/2;
+  inner.add(seam);
+
+  if(side==='front'){
+    inner.position.z = D/2 + 0.002;
+  } else {
+    inner.rotation.y = -Math.PI/2;
+    inner.position.x = W/2 + 0.002;
+  }
+
+  group.add(inner);
+  group.userData.leftPanel = leftPanel;
+  group.userData.rightPanel = rightPanel;
+  group.userData.panelW = panelW;
+  group.userData.open = 0;
+  return group;
+}
+
+function setLandingDoorOpen(doorGroup, t){
+  const {leftPanel, rightPanel, panelW} = doorGroup.userData;
+  const travel = panelW * 0.96;
+  // panels slide apart along their local x (inner was rotated to face the correct wall)
+  leftPanel.position.x = -panelW/2 - t*travel;
+  rightPanel.position.x = panelW/2 + t*travel;
+  doorGroup.userData.open = t;
+}
+
+// A small brass plate with the floor label next to the landing door
+function makeFloorPlate(i, W, D, side){
+  const g = new THREE.Group();
+  const plate = new THREE.Mesh(
+    new THREE.BoxGeometry(0.14, 0.18, 0.01),
+    new THREE.MeshStandardMaterial({color:0xD4A574, metalness:0.9, roughness:0.2, emissive:0xD4A574, emissiveIntensity:0.08})
+  );
+  const y = FLOOR_H*0.6;
+  if(side==='front'){
+    plate.position.set(W/2 - 0.22, y, D/2 + 0.01);
+  } else {
+    plate.rotation.y = -Math.PI/2;
+    plate.position.set(W/2 + 0.01, y, -D/2 + 0.22);
+  }
+  g.add(plate);
+  return g;
+}
+
+// Cabin = full interior box with doors on front (+Z) AND side (+X)
+function buildCabin(W, D){
+  const group = new THREE.Group();
+  const cabW = W*0.72, cabD = D*0.72, cabH = FLOOR_H*0.88;
+  const thick = 0.02;
+  const fs = finishSpec[params.finish];
+
+  const shellMat = new THREE.MeshStandardMaterial({
+    color:fs.color, metalness:fs.metalness, roughness:fs.roughness, side:THREE.FrontSide
+  });
+  const panelMat = new THREE.MeshStandardMaterial({
+    color:fs.color, metalness:fs.metalness, roughness:Math.max(0.08, fs.roughness*0.85)
+  });
+  const floorMat = new THREE.MeshStandardMaterial({
+    color:0x141618, metalness:0.35, roughness:0.22
+  });
+  const ceilMat = new THREE.MeshStandardMaterial({
+    color:0xF1E8D6, metalness:0.15, roughness:0.4,
+    emissive:0xFFE0B2, emissiveIntensity:0.22
+  });
+
+  // Cabin floor and ceiling
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(cabW, thick, cabD), floorMat);
+  floor.position.y = thick/2;
+  floor.castShadow = floor.receiveShadow = true;
+  group.add(floor);
+
+  const ceiling = new THREE.Mesh(new THREE.BoxGeometry(cabW, thick, cabD), ceilMat);
+  ceiling.position.y = cabH - thick/2;
+  ceiling.receiveShadow = true;
+  group.add(ceiling);
+
+  // Ceiling light panel (emissive) + interior point light
+  const light = new THREE.Mesh(
+    new THREE.BoxGeometry(cabW*0.55, 0.012, cabD*0.55),
+    new THREE.MeshStandardMaterial({color:0xFFF4DC, emissive:0xFFE0B2, emissiveIntensity:1.7})
+  );
+  light.position.y = cabH - thick - 0.007;
+  group.add(light);
+
+  const interior = new THREE.PointLight(0xFFE7BF, 0.55, 3.2, 2);
+  interior.position.y = cabH - 0.08;
+  group.add(interior);
+
+  // Back wall (-Z) solid
+  const back = new THREE.Mesh(new THREE.BoxGeometry(cabW, cabH, thick), shellMat);
+  back.position.set(0, cabH/2, -cabD/2 + thick/2);
+  back.castShadow = back.receiveShadow = true;
+  group.add(back);
+
+  // Left wall (-X) solid
+  const leftW = new THREE.Mesh(new THREE.BoxGeometry(thick, cabH, cabD), shellMat);
+  leftW.position.set(-cabW/2 + thick/2, cabH/2, 0);
+  leftW.castShadow = leftW.receiveShadow = true;
+  group.add(leftW);
+
+  // --- Front wall (+Z) with door opening ---
+  const openW_F  = cabW * 0.6;
+  const sideStripF = (cabW - openW_F) / 2;
+  const doorH = cabH * 0.88;
+  const topStripH = cabH - doorH;
+
+  const frontTop = new THREE.Mesh(
+    new THREE.BoxGeometry(cabW, topStripH, thick), shellMat
+  );
+  frontTop.position.set(0, doorH + topStripH/2, cabD/2 - thick/2);
+  frontTop.castShadow = frontTop.receiveShadow = true;
+  group.add(frontTop);
+  if(sideStripF > 0.005){
+    const fl = new THREE.Mesh(new THREE.BoxGeometry(sideStripF, doorH, thick), shellMat);
+    fl.position.set(-cabW/2 + sideStripF/2, doorH/2, cabD/2 - thick/2);
+    fl.castShadow = fl.receiveShadow = true;
+    group.add(fl);
+    const fr = fl.clone();
+    fr.position.x = cabW/2 - sideStripF/2;
+    group.add(fr);
+  }
+  // Front cabin door panels (slide in +/-X)
+  const panelW_F = openW_F/2;
+  const fL = new THREE.Mesh(new THREE.BoxGeometry(panelW_F, doorH, thick*0.8), panelMat);
+  const fR = fL.clone();
+  fL.castShadow = fR.castShadow = true;
+  fL.position.set(-panelW_F/2, doorH/2, cabD/2 - thick*0.5);
+  fR.position.set(panelW_F/2, doorH/2, cabD/2 - thick*0.5);
+  group.add(fL); group.add(fR);
+  cabinDoorsF = {left:fL, right:fR, panelW:panelW_F, open:0};
+
+  // --- Right wall (+X) with door opening (side-opening floors) ---
+  const openW_S  = cabD * 0.58;
+  const sideStripS = (cabD - openW_S) / 2;
+  const rightTop = new THREE.Mesh(
+    new THREE.BoxGeometry(thick, topStripH, cabD), shellMat
+  );
+  rightTop.position.set(cabW/2 - thick/2, doorH + topStripH/2, 0);
+  rightTop.castShadow = rightTop.receiveShadow = true;
+  group.add(rightTop);
+  if(sideStripS > 0.005){
+    const sl = new THREE.Mesh(new THREE.BoxGeometry(thick, doorH, sideStripS), shellMat);
+    sl.position.set(cabW/2 - thick/2, doorH/2, -cabD/2 + sideStripS/2);
+    sl.castShadow = sl.receiveShadow = true;
+    group.add(sl);
+    const sr = sl.clone();
+    sr.position.z = cabD/2 - sideStripS/2;
+    group.add(sr);
+  }
+  // Side cabin door panels (slide in +/-Z)
+  const panelW_S = openW_S/2;
+  const sL = new THREE.Mesh(new THREE.BoxGeometry(thick*0.8, doorH, panelW_S), panelMat);
+  const sR = sL.clone();
+  sL.castShadow = sR.castShadow = true;
+  sL.position.set(cabW/2 - thick*0.5, doorH/2, -panelW_S/2);
+  sR.position.set(cabW/2 - thick*0.5, doorH/2, panelW_S/2);
+  group.add(sL); group.add(sR);
+  cabinDoorsS = {left:sL, right:sR, panelW:panelW_S, open:0};
+
+  // Brass handrails (back + left walls)
+  const handrailMat = new THREE.MeshStandardMaterial({color:0xD4A574, metalness:0.92, roughness:0.2});
+  const hrBack = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.014, 0.014, cabW*0.88, 14),
+    handrailMat
+  );
+  hrBack.rotation.z = Math.PI/2;
+  hrBack.position.set(0, cabH*0.55, -cabD/2 + 0.09);
+  group.add(hrBack);
+
+  const hrLeft = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.014, 0.014, cabD*0.88, 14),
+    handrailMat
+  );
+  hrLeft.rotation.x = Math.PI/2;
+  hrLeft.position.set(-cabW/2 + 0.09, cabH*0.55, 0);
+  group.add(hrLeft);
+
+  // Control panel near the front-left corner
+  const cpMat = new THREE.MeshStandardMaterial({color:0x1A1B20, metalness:0.8, roughness:0.28});
+  const cp = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.34, 0.012), cpMat);
+  cp.position.set(-cabW/2 + 0.12, cabH*0.5, cabD/2 - thick*1.2);
+  group.add(cp);
+  const btnMat = new THREE.MeshStandardMaterial({color:0xEAC197, emissive:0xD4A574, emissiveIntensity:0.55});
+  for(let i=0;i<6;i++){
+    const btn = new THREE.Mesh(new THREE.CircleGeometry(0.009, 16), btnMat);
+    btn.position.set(-cabW/2 + 0.12, cabH*0.38 + i*0.035, cabD/2 - thick*0.6);
+    btn.rotation.y = 0;
+    group.add(btn);
+  }
+
+  // Brass edge accent around cabin exterior
+  const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(cabW, cabH, cabD));
+  const edgeLines = new THREE.LineSegments(
+    edges,
+    new THREE.LineBasicMaterial({color:0xEAC197, transparent:true, opacity:0.7})
+  );
+  edgeLines.position.y = cabH/2;
+  group.add(edgeLines);
+
+  group.userData.height = cabH;
+  return group;
+}
+
+function setCabinDoorOpen(side, t){
+  const d = side==='front' ? cabinDoorsF : cabinDoorsS;
+  if(!d) return;
+  const travel = d.panelW * 0.94;
+  if(side==='front'){
+    d.left.position.x  = -d.panelW/2 - t*travel;
+    d.right.position.x =  d.panelW/2 + t*travel;
+  } else {
+    d.left.position.z  = -d.panelW/2 - t*travel;
+    d.right.position.z =  d.panelW/2 + t*travel;
+  }
+  d.open = t;
 }
 
 function updateCabinPos(){
   if(!cabin) return;
-  const floorH = 1.1;
-  const maxY = (params.floors-1) * floorH;
+  const maxY = (params.floors-1) * FLOOR_H;
   const t = params.pos/100;
-  cabin.position.y = (floorH*0.5) + t*maxY;
-  // label readout
+  cabin.position.y = t*maxY;
   const idx = Math.round(t * (params.floors-1));
-  document.getElementById('val-pos').textContent = floorLabels[idx] || ('Floor '+idx);
+  const el = document.getElementById('val-pos');
+  if(el) el.textContent = floorLabels[idx] || ('Floor '+idx);
 }
 
 function updateReadouts(){
@@ -1479,6 +1861,102 @@ function animate(){
 }
 
 /* ==================================================
+   DOOR + MOTION ANIMATION
+   ================================================== */
+function wait(ms){return new Promise(r=>setTimeout(r,ms));}
+function easeInOut(t){return t<0.5 ? 2*t*t : -1+(4-2*t)*t;}
+
+function tween(duration, fn){
+  return new Promise(res=>{
+    const t0 = performance.now();
+    function step(){
+      if(simState.abort){ res(); return; }
+      const t = Math.min(1, (performance.now()-t0)/duration);
+      fn(easeInOut(t), t);
+      if(t<1) requestAnimationFrame(step); else res();
+    }
+    step();
+  });
+}
+
+function animateDoorsAtFloor(floorIdx, target){
+  const ld = landingDoors[floorIdx];
+  if(!ld) return Promise.resolve();
+  const side = ld.userData.side;
+  const startLanding = ld.userData.open;
+  const startCab = side==='front' ? (cabinDoorsF?.open ?? 0) : (cabinDoorsS?.open ?? 0);
+  return tween(780, (e)=>{
+    const vL = startLanding + (target - startLanding)*e;
+    const vC = startCab + (target - startCab)*e;
+    setLandingDoorOpen(ld, vL);
+    setCabinDoorOpen(side, vC);
+  });
+}
+
+function moveCabinToFloor(target){
+  const maxY = (params.floors-1)*FLOOR_H;
+  const startY = cabin.position.y;
+  const endY = target*FLOOR_H;
+  const distance = Math.abs(endY - startY);
+  if(distance < 1e-4) return Promise.resolve();
+  const duration = Math.max(520, distance*620);
+  return tween(duration, (e)=>{
+    cabin.position.y = startY + (endY - startY)*e;
+    if(maxY > 0){
+      params.pos = (cabin.position.y/maxY)*100;
+      const slider = document.getElementById('ctrl-pos');
+      if(slider) slider.value = params.pos;
+    }
+    const idx = target; // we know the target
+    const el = document.getElementById('val-pos');
+    if(el) el.textContent = (floorLabels[idx] || ('Floor '+idx)) + ' ↑';
+  }).then(()=>{
+    const el = document.getElementById('val-pos');
+    if(el) el.textContent = floorLabels[target] || ('Floor '+target);
+  });
+}
+
+async function runSimulation(){
+  if(!threeInited || simState.running) return;
+  simState.running = true;
+  simState.abort = false;
+  const btn = document.getElementById('sim-btn');
+  const lbl = btn?.querySelector('.sim-lbl');
+  btn?.classList.add('running');
+  if(lbl) lbl.textContent = 'Running sequence…';
+
+  // up-cycle: stop at every floor
+  const sequence = [];
+  for(let i=0;i<params.floors;i++) sequence.push(i);
+  for(let i=params.floors-2;i>=0;i--) sequence.push(i);
+
+  let lastVisited = -1;
+  for(const f of sequence){
+    if(simState.abort) break;
+    await moveCabinToFloor(f);
+    if(simState.abort) break;
+    await wait(180);
+    await animateDoorsAtFloor(f, 1);
+    if(simState.abort) break;
+    await wait(950);
+    await animateDoorsAtFloor(f, 0);
+    lastVisited = f;
+    await wait(260);
+  }
+
+  // If aborted mid-cycle, close whatever was open
+  if(simState.abort && lastVisited >= 0){
+    simState.abort = false;
+    await animateDoorsAtFloor(lastVisited, 0);
+  }
+
+  btn?.classList.remove('running');
+  if(lbl) lbl.textContent = 'Simulate lift cycle';
+  simState.running = false;
+  simState.abort = false;
+}
+
+/* ==================================================
    CONTROL WIRING
    ================================================== */
 document.getElementById('ctrl-floors').addEventListener('input',e=>{
@@ -1494,8 +1972,26 @@ document.getElementById('ctrl-depth').addEventListener('input',e=>{
   buildShaft();
 });
 document.getElementById('ctrl-pos').addEventListener('input',e=>{
+  if(simState.running) return;
   params.pos = +e.target.value;
   updateCabinPos();
+});
+// On slider release, snap to nearest floor and open/close its doors
+document.getElementById('ctrl-pos').addEventListener('change', async e=>{
+  if(simState.running) return;
+  const maxY = (params.floors-1)*FLOOR_H;
+  const t = (+e.target.value)/100;
+  const target = Math.round(t * (params.floors-1));
+  simState.running = true; simState.abort = false;
+  await moveCabinToFloor(target);
+  await animateDoorsAtFloor(target, 1);
+  await wait(750);
+  await animateDoorsAtFloor(target, 0);
+  simState.running = false;
+  if(maxY>0){
+    params.pos = (target*FLOOR_H/maxY)*100;
+    e.target.value = params.pos;
+  }
 });
 document.querySelectorAll('.finish-opt').forEach(o=>{
   o.addEventListener('click',()=>{
@@ -1504,6 +2000,13 @@ document.querySelectorAll('.finish-opt').forEach(o=>{
     params.finish = o.dataset.finish;
     buildShaft();
   });
+});
+document.getElementById('sim-btn').addEventListener('click', ()=>{
+  if(simState.running){
+    simState.abort = true;
+  } else {
+    runSimulation();
+  }
 });
 
 /* ==================================================
